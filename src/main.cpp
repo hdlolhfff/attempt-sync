@@ -15,11 +15,32 @@ using geode::utils::web::WebResponse;
 
 namespace {
 struct Import { fs::path path; aps::Bytes before, after; };
-struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; int synced=0; };
+struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; bool cancelled=false; int synced=0; };
 struct Config { std::string token; fs::path dir; bool owner=false; };
 bool running=false;
 std::optional<Outcome> pending;
 std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
+
+Ref<Notification> syncNotification;
+// One overlay notification is updated in place throughout the job.
+void showLiveProgress(std::string const& text) {
+    if(!syncNotification) {
+        syncNotification=Notification::create(text,NotificationIcon::Loading,0.f);
+        syncNotification->show();
+    } else syncNotification->setString(text);
+}
+void finishProgress(std::string const& text,NotificationIcon icon) {
+    if(!syncNotification) {
+        syncNotification=Notification::create(text,icon,NOTIFICATION_LONG_TIME);
+        syncNotification->show();
+    } else {
+        syncNotification->setString(text);
+        syncNotification->setIcon(icon);
+        syncNotification->setTime(NOTIFICATION_LONG_TIME);
+    }
+    // The notification queue retains it through the completion animation.
+    syncNotification=nullptr;
+}
 
 struct Prompt {
     aps::BatchReview review;
@@ -32,7 +53,7 @@ class SyncConfirmation : public Popup {
         if(reply) {
             status=confirmed?"Sync All approved. Syncing your playback files; please wait.":"Sync cancelled. No files were uploaded or replaced.";
             log::info("Playback batch confirmation: {}",confirmed?"approved":"cancelled");
-            if(confirmed) Notification::create("Sync All started",NotificationIcon::Info)->show();
+            if(confirmed) showLiveProgress("Attempt Sync: starting uploads...");
             (void)reply->send(confirmed); reply.reset();
         }
         Popup::onClose(nullptr);
@@ -86,6 +107,7 @@ arc::Future<bool> confirmSync(aps::BatchReview review) {
     queueInMainThread([review,sender=std::move(sender)] mutable {
         prompt.emplace(Prompt{review,std::move(sender)});
         status="Waiting for Sync All confirmation. Return to the main menu to review.";
+        showLiveProgress("Attempt Sync: awaiting approval");
         showPrompt();
     });
     auto result=co_await receiver.recv();
@@ -93,9 +115,10 @@ arc::Future<bool> confirmSync(aps::BatchReview review) {
 }
 
 // Worker progress is delivered to the main thread, just like confirmation UI.
-void progress(std::string message) {
-    queueInMainThread([message=std::move(message)] {
+void progress(std::string message,std::string banner) {
+    queueInMainThread([message=std::move(message),banner=std::move(banner)] {
         status=message;
+        showLiveProgress(banner);
         log::info("{}",message);
     });
 }
@@ -171,7 +194,8 @@ arc::Future<Outcome> sync(Config c) {
         size_t reviewed=0;
         for(auto const& name:names) {
             currentFile=name;
-            progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",++reviewed,names.size(),name));
+            ++reviewed;
+            progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",reviewed,names.size(),name),fmt::format("Comparing {} / {}",reviewed,names.size()));
             auto path=c.dir/name;
             auto local=read(path);
             auto endpoint=base+"/contents/attempts/"+name;
@@ -198,17 +222,21 @@ arc::Future<Outcome> sync(Config c) {
             } else ++out.synced;
         }
         if(c.owner && review.files && !(co_await confirmSync(review))) {
+            out.cancelled=true;
             out.message="Sync cancelled. No files were uploaded or replaced.";
             co_return out;
         }
         size_t processed=0;
         for(auto& item:batch) {
             currentFile=item.name;
-            progress(fmt::format("{} file {} of {}: {}. Please wait; no more confirmation is needed.",c.owner?"Syncing":"Downloading",++processed,batch.size(),item.name));
+            ++processed;
+            progress(fmt::format("{} file {} of {}: {}. Please wait; no more confirmation is needed.",c.owner?"Syncing":"Downloading",processed,batch.size(),item.name),fmt::format("Syncing {} / {}",processed,batch.size()));
             auto endpoint=base+"/contents/attempts/"+item.name;
             bool done=false;
             for(int retry=0;retry<3 && !done;++retry) {
                 if(item.upload) {
+                    progress(fmt::format("Uploading file {} of {}: {}.",processed,batch.size(),item.name),
+                             fmt::format("Uploading {} / {} ({}%)",processed,batch.size(),(processed-1)*100/batch.size()));
                     auto body=matjson::Value::object();
                     body["message"]="Sync Attempt Playback: "+item.name;
                     body["branch"]=aps::playbackBranch;
@@ -216,7 +244,7 @@ arc::Future<Outcome> sync(Config c) {
                     if(!item.sha.empty()) body["sha"]=item.sha;
                     auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
                     if(uploaded.code()==409 || uploaded.code()==422) {
-                        progress(fmt::format("Retrying file {} of {} after a cloud change: {}.",processed,batch.size(),item.name));
+                        progress(fmt::format("Retrying file {} of {} after a cloud change: {}.",processed,batch.size(),item.name),fmt::format("Retrying upload {} / {}",processed,batch.size()));
                         // Retain the approved local snapshot, merge cloud additions,
                         // and retry without another confirmation for this file.
                         auto response=co_await request(c).param("ref",aps::playbackBranch).get(endpoint);
@@ -246,6 +274,8 @@ arc::Future<Outcome> sync(Config c) {
                     aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Retry sync.");
                     out.imports.push_back({item.path,std::move(item.local),std::move(item.merged)});
                 }
+                progress(fmt::format("Completed file {} of {}: {}.",processed,batch.size(),item.name),
+                         fmt::format("Synced {} / {} ({}%)",processed,batch.size(),processed*100/batch.size()));
                 log::info("Completed playback file {} of {}: {}",processed,batch.size(),item.name);
                 ++out.synced; done=true;
             }
@@ -272,6 +302,7 @@ void installPending() {
             fs::create_directories(backup);
             auto name=item.path.filename();
             auto temp=item.path; temp+=".sync-tmp";
+            showLiveProgress(fmt::format("Applying {} / {}", &item-out.imports.data()+1,out.imports.size()));
             write(temp,item.after);
             // Keep the original in a separate directory. Rename rather than delete
             // on Windows, where rename cannot replace an existing destination.
@@ -286,8 +317,9 @@ void installPending() {
     } catch(std::exception const& e) { out.failed=true; status=std::string("Import failed: ")+e.what()+". Original files are in backups."; }
     running=false;
     if(out.failed) FLAlertLayer::create("Attempt Sync",status,"OK")->show();
-    Notification::create(out.failed?"Attempt Sync needs attention":"Attempt Sync finished",
-                         out.failed?NotificationIcon::Warning:NotificationIcon::Success)->show();
+    finishProgress(out.failed?"Attempt Sync needs attention":out.cancelled?"Attempt Sync cancelled":
+                   fmt::format("Attempt Sync finished: {} levels",out.synced),
+                   (out.failed || skipped)?NotificationIcon::Warning:out.cancelled?NotificationIcon::Info:NotificationIcon::Success);
 }
 void start() {
     installPending();
@@ -303,8 +335,10 @@ void start() {
         aps::require(playback->getVersion()==VersionInfo(1,5,7),"This sync format was verified for Attempt Playback 1.5.7. Use that version until this mod is updated.");
         c.dir=playback->getSaveDir()/"attempts";
         running=true; status="Syncing with GitHub. You can keep playing; downloads apply at the main menu.";
+        showLiveProgress("Attempt Sync: connecting...");
         async::spawn(sync(std::move(c)),[](Outcome out) {
-            pending=std::move(out); status="Downloads ready; return to the main menu to apply them."; installPending();
+            pending=std::move(out); status="Downloads ready; return to the main menu to apply them.";
+            showLiveProgress("Ready: return to menu to apply"); installPending();
         });
     } catch(std::exception const& e) { status=e.what(); FLAlertLayer::create("Attempt Sync",status,"OK")->show(); }
 }

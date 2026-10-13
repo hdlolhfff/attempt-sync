@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.1). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.2). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -91,4 +91,6 @@ GitHub Actions builds the native mod for all requested platforms and combines th
 
 Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
 
-Version 1.3.1 updates the status immediately after Sync All, and reports comparing/syncing file N of M. Tap the main-menu Sync button during a running job to check current progress. Sync approval, per-file progress, and completion are logged without credentials.
+Version 1.3.2 updates the status immediately after Sync All, and reports comparing/syncing file N of M. Tap the main-menu Sync button during a running job to check current progress. Sync approval, per-file progress, and completion are logged without credentials.
+
+Version 1.3.2 adds a persistent bottom notification for all sync phases, including uploading file N / total and the percentage of files completed. It updates in place and changes to the completion message before dismissing.
