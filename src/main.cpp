@@ -117,6 +117,7 @@ arc::Future<bool> confirmSync(aps::BatchReview review) {
 // Worker progress is delivered to the main thread, just like confirmation UI.
 void progress(std::string message,std::string banner) {
     queueInMainThread([message=std::move(message),banner=std::move(banner)] {
+        if(!running) return; // A late progress delivery must not reopen a finished banner.
         status=message;
         showLiveProgress(banner);
         log::info("{}",message);
