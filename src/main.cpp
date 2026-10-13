@@ -103,6 +103,7 @@ bool safeName(std::string const& n) { return std::regex_match(n,std::regex("[A-Z
 arc::Future<Outcome> sync(Config c) {
     Outcome out;
     size_t importBytes=0;
+    std::string currentFile;
     try {
         auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
         // Resolve branch first: a missing repo/branch must not be mistaken for an empty folder.
@@ -128,6 +129,7 @@ arc::Future<Outcome> sync(Config c) {
         }
         aps::require(names.size()<1000,"Too many level files to sync");
         for(auto const& name:names) {
+            currentFile=name;
             auto path=c.dir/name;
             auto local=read(path);
             bool done=false;
@@ -180,7 +182,7 @@ arc::Future<Outcome> sync(Config c) {
         out.message=(c.owner?"Synced ":"Downloaded playbacks for ")+std::to_string(out.synced)+" levels.";
         if(!c.owner && out.synced==0) out.message="No playbacks published yet. The owner needs to enable Upload My Attempts and sync first.";
     } catch(std::exception const& e) {
-        out.failed=true; out.message=e.what();
+        out.failed=true; out.message=(currentFile.empty()?std::string():currentFile+": ")+e.what();
     }
     co_return out;
 }

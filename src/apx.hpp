@@ -53,13 +53,15 @@ inline File parse(Bytes const& b) {
             size_t q=48; track(data,q,u32(data,16)); track(data,q,u32(data,20));
             require(q==data.size(),"Trailing ATT3 data"); f.attempts.push_back(std::move(data));
         } else if(type==0x48544150) {
-            require(f.pathHeader.empty() && data.size()>=20 && u32(data,0)==5,"Unsupported or duplicate practice PATH");
-            f.pathHeader=slice(data,0,20); auto count=u32(data,4);
+            require(data.size()>=20 && u32(data,0)==5,"Unsupported practice PATH");
+            // The writer appends updated PATH snapshots. Like Attempt Playback,
+            // use the last complete snapshot rather than combining stale routes.
+            f.pathHeader=slice(data,0,20); f.sessions.clear(); auto count=u32(data,4);
             require(count<=100'000,"Too many practice sessions"); size_t q=20;
             for(uint32_t i=0;i<count;++i) {
                 auto start=q; auto a=u32(data,q+4), s=u32(data,q+8);
                 require(a<=1'000'000 && s<=1'000'000,"Too many practice items");
-                size_t size=28+size_t(a)*4+size_t(s)*52;
+                size_t size=28+size_t(a)*4+size_t(s)*48;
                 f.sessions.push_back(slice(data,start,size)); q+=size;
             }
             require(q==data.size(),"Trailing PATH data");
@@ -98,7 +100,7 @@ inline Bytes merge(Bytes const& remote,Bytes const& local) {
             auto old=u32(s,0); auto a=u32(s,4), n=u32(s,8);
             put(s,0,0); s[26]=s[27]=0;
             for(uint32_t i=0;i<a;++i) remap(s,28+size_t(i)*4,ids);
-            for(uint32_t i=0;i<n;++i) remap(s,28+size_t(a)*4+size_t(i)*52+8,ids);
+            for(uint32_t i=0;i<n;++i) remap(s,28+size_t(a)*4+size_t(i)*48+8,ids);
             auto [it,added]=seenSessions.emplace(s,uint32_t(sessions.size()+1));
             sessionIds[old]=it->second;
             if(added) { put(s,0,it->second); sessions.push_back(std::move(s)); }

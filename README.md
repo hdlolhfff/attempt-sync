@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.2.0). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.2.1). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -47,6 +47,10 @@ The token stays in Geode's local settings in **plain text**. It is never built i
 - After downloading, open the matching level in Attempt Playback to see the ghosts. The mod syncs recordings, not the levels themselves.
 
 The owner has chosen public viewing. GitHub repository visibility must be changed by an administrator; check the repository to confirm the change has taken effect.
+
+## Practice playback format fix (1.2.1)
+
+Versions through 1.2.0 incorrectly treated the packed APX v5 practice segment as 52 bytes; its actual size is 48 bytes. Valid practice saves could be rejected as "Truncated APX chunk". The parser now uses the correct layout and accepts appended PATH snapshots, using the newest one just as Attempt Playback does. Regression tests serialize the published fields independently of parser offsets. Errors now identify the playback filename.
 
 ## Review before owner sync
 

@@ -2,15 +2,31 @@
 #include <cassert>
 #include <iostream>
 #include <random>
+#include <cstring>
 using namespace aps;
 Bytes attempt(uint32_t serial,uint8_t marker) {
     Bytes b(48); put(b,0,serial); b[14]=2; put(b,16,1);
     append32(b,23); b.push_back(1); b.resize(b.size()+22); b[b.size()-22]=marker;
     append32(b,0); return b;
 }
+// Packed v5 layout from Attempt Playback's published APX format. Serialize
+// the actual fields, independently of the sync parser's offset constants.
+#pragma pack(push, 1)
+struct PracticeSegmentV5 {
+    float startX,endX;
+    int32_t ownerSerial,p1Frames,p2Frames;
+    float maxXReached;
+    double baseTimeOffset,localStartTime,localEndTime;
+};
+#pragma pack(pop)
+static_assert(sizeof(PracticeSegmentV5)==48);
 Bytes session(uint32_t id,uint32_t serial) {
     Bytes s(28); put(s,0,id); put(s,4,1); put(s,8,1);
-    append32(s,serial); auto p=s.size(); s.resize(p+52); put(s,p+8,serial); return s;
+    append32(s,serial);
+    PracticeSegmentV5 segment{0.f,100.f,int32_t(serial),1,0,100.f,0.,0.,1.};
+    auto p=s.size(); s.resize(p+sizeof(segment));
+    std::memcpy(s.data()+p,&segment,sizeof(segment));
+    return s;
 }
 Bytes file(std::vector<Bytes> const& attempts,std::vector<Bytes> const& sessions={}) {
     Bytes b={'A','P','X','2',8,0,0,0};
@@ -25,6 +41,14 @@ template<class F> void rejects(F fn) { bool failed=false; try { fn(); } catch(st
 int main() {
     auto a=file({attempt(1,10)},{session(1,1)});
     auto b=file({attempt(1,20)},{session(1,1)});
+    // Multiple PATH chunks are normal: the last saved snapshot takes priority.
+    auto appendHistory=file({attempt(1,10),attempt(2,20)},{session(1,1)});
+    auto newestPath=file({}, {session(7,2)});
+    appendHistory.insert(appendHistory.end(),newestPath.begin()+8,newestPath.end());
+    auto history=parse(appendHistory);
+    assert(history.sessions.size()==1 && u32(history.sessions[0],0)==7);
+    assert(u32(history.pathHeader,8)==7 && u32(history.sessions[0],28)==2);
+    assert(parse(merge({},appendHistory)).sessions.size()==1);
     auto comparison=compareFiles(a,b);
     assert(comparison.localBytes==comparison.cloudBytes);
     assert(comparison.localOnly==1 && comparison.cloudOnly==1);
