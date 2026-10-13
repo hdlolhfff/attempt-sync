@@ -7,7 +7,7 @@
   },
   "id": "local.attempt_sync",
   "name": "Attempt Sync",
-  "version": "v1.1.0",
+  "version": "v1.2.0",
   "developer": "Attempt Sync",
   "description": "Sync or view hdlolhfff's Attempt Playback ghosts",
   "dependencies": {
@@ -25,7 +25,7 @@
       "type": "bool",
       "name": "Upload My Attempts",
       "default": false,
-      "description": "Enable only on your own devices to sync your attempts to hdlolhfff/gd-attempts. Leave off to download and view published playbacks only. Uploads require a GitHub token with Contents read/write access."
+      "description": "Enable on your devices to sync to hdlolhfff/gd-attempts. Changed files show a size/attempt comparison and ask before syncing. Viewers leave this off. Owner uploads need a GitHub token with Contents read/write."
     },
     "github-token": {
       "type": "string",
@@ -37,7 +37,7 @@
       "type": "bool",
       "name": "Sync at Main Menu",
       "default": false,
-      "description": "Sync when the main menu opens. With Upload My Attempts off, this only downloads playbacks."
+      "description": "Compare files when the main menu opens. In owner mode, changed files require confirmation before syncing; viewer mode only downloads."
     }
   }
 }

@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.1.0). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.2.0). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -46,7 +46,15 @@ The token stays in Geode's local settings in **plain text**. It is never built i
 - For a **private** replay repository, each viewer needs access through their own GitHub account and their own token with **Contents: Read-only** for gd-attempts. The owner must grant access. Do not give viewers the owner's upload token.
 - After downloading, open the matching level in Attempt Playback to see the ghosts. The mod syncs recordings, not the levels themselves.
 
-The replay repository was private when this version was prepared. This update does not change its visibility. Make it public through GitHub only if you want recordings visible to everyone.
+The owner has chosen public viewing. GitHub repository visibility must be changed by an administrator; check the repository to confirm the change has taken effect.
+
+## Review before owner sync
+
+Before an owner sync changes a file, a **Review Playback Sync** dialog shows its filename, local/GitHub sizes, attempt counts, and the unique attempts present only on each side. It identifies which file is larger but does not assume that byte size equals attempt count. Equal-size files can contain different recordings.
+
+Tap **Sync** to keep both histories and publish any new local data, or **Cancel** to stop the sync before changing that file. Files completed earlier in the same batch remain synced. Conflicts with another device are reread and reviewed again. Unchanged files do not prompt. With automatic sync enabled, changed owner files still require confirmation. Viewers remain download-only.
+
+If a comparison finishes during gameplay, it waits until you return to the main menu to show the dialog. Local data changed meanwhile is kept and can be included by syncing again.
 
 ## What sync does
 

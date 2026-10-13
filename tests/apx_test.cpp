@@ -25,6 +25,15 @@ template<class F> void rejects(F fn) { bool failed=false; try { fn(); } catch(st
 int main() {
     auto a=file({attempt(1,10)},{session(1,1)});
     auto b=file({attempt(1,20)},{session(1,1)});
+    auto comparison=compareFiles(a,b);
+    assert(comparison.localBytes==comparison.cloudBytes);
+    assert(comparison.localOnly==1 && comparison.cloudOnly==1);
+    auto larger=file({attempt(1,10),attempt(2,20)});
+    comparison=compareFiles(a,larger);
+    assert(comparison.localBytes>comparison.cloudBytes && comparison.localAttempts==2 && comparison.cloudAttempts==1);
+    assert(comparison.localOnly==1 && comparison.cloudOnly==0);
+    comparison=compareFiles(larger,a);
+    assert(comparison.localOnly==0 && comparison.cloudOnly==1);
     auto view=planSync(a,b,false);
     assert(!view.upload && parse(view.imported).attempts.size()==2);
     assert(!planSync({},b,false).upload);
@@ -39,6 +48,8 @@ int main() {
     assert(merge(ab,a)==ab && merge(ab,b)==ab && merge(ab,ab)==ab);
     auto duplicate=file({attempt(99,10)},{session(90,99)});
     assert(merge(a,duplicate)==a);
+    comparison=compareFiles(a,duplicate);
+    assert(comparison.localOnly==0 && comparison.cloudOnly==0);
     assert(merge({},a)==a && merge(a,{})==a);
     auto orphan=file({attempt(1,10)},{session(1,2)});
     rejects([&]{ merge(a,orphan); });

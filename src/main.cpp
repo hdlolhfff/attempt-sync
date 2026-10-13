@@ -20,6 +20,52 @@ bool running=false;
 std::optional<Outcome> pending;
 std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
 
+struct Prompt {
+    std::string message;
+    arc::oneshot::Sender<bool> reply;
+};
+std::optional<Prompt> prompt;
+class SyncConfirmation : public CCNode, public FLAlertLayerProtocol {
+    arc::oneshot::Sender<bool> reply;
+public:
+    explicit SyncConfirmation(arc::oneshot::Sender<bool> sender):reply(std::move(sender)) {}
+    void FLAlert_Clicked(FLAlertLayer*, bool confirmed) override {
+        (void)reply.send(confirmed);
+    }
+};
+void showPrompt() {
+    if(!prompt || GameManager::get()->m_playLayer || GameManager::get()->m_levelEditorLayer) return;
+    auto value=std::move(*prompt); prompt.reset();
+    auto listener=new SyncConfirmation(std::move(value.reply));
+    if(!listener->init()) { delete listener; return; }
+    listener->autorelease();
+    auto alert=FLAlertLayer::create(listener,"Review Playback Sync",value.message,"Cancel","Sync",380.f,true,290.f,0.7f);
+    // The alert owns its delegate. Closing the scene closes the reply channel
+    // and cancels the current file rather than silently proceeding.
+    alert->addChild(listener);
+    alert->show();
+}
+arc::Future<bool> confirmSync(std::string message) {
+    auto [sender,receiver]=arc::oneshot::channel<bool>();
+    queueInMainThread([message=std::move(message),sender=std::move(sender)] mutable {
+        prompt.emplace(Prompt{std::move(message),std::move(sender)});
+        status="Waiting for sync confirmation. Return to the main menu to review.";
+        showPrompt();
+    });
+    auto result=co_await receiver.recv();
+    co_return result.isOk() && result.unwrap();
+}
+std::string reviewMessage(std::string const& name, aps::FileComparison const& info, bool upload) {
+    auto size=[](size_t bytes) { return fmt::format("{:.1f} KiB",double(bytes)/1024.0); };
+    std::string text=name+"\n\nLocal: "+size(info.localBytes)+" ("+std::to_string(info.localAttempts)+" attempts)";
+    text+="\nGitHub: "+size(info.cloudBytes)+" ("+std::to_string(info.cloudAttempts)+" attempts)\n";
+    text+=info.localBytes>info.cloudBytes?"Local file is larger.":info.localBytes<info.cloudBytes?"GitHub file is larger.":"File sizes are equal.";
+    text+="\n"+std::to_string(info.localOnly)+" local-only and "+std::to_string(info.cloudOnly)+" cloud-only attempts.\n\n";
+    text+="Size alone does not prove which has more attempts. Sync keeps both histories and backs up replaced local files.\n\n";
+    text+=upload?"Uploading will publish these playbacks to gd-attempts. If the repository is public, anyone can download them.":"This will download GitHub playbacks. No upload is needed.";
+    return text;
+}
+
 aps::Bytes read(fs::path const& p) {
     if(!fs::exists(p)) return {};
     aps::require(fs::is_regular_file(p) && !fs::is_symlink(p),"Attempt file must be a regular file");
@@ -42,7 +88,7 @@ WebRequest request(Config const& c,bool raw=false) {
     if(!c.token.empty()) req.header("Authorization","Bearer "+c.token);
     req.header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
        .header("X-GitHub-Api-Version","2022-11-28")
-       .header("User-Agent","AttemptSync/1.1")
+       .header("User-Agent","AttemptSync/1.2")
        .timeout(std::chrono::seconds(45));
     return req;
 }
@@ -104,6 +150,14 @@ arc::Future<Outcome> sync(Config c) {
                 aps::require(c.owner || !remote.empty(),"Playback missing from the selected cloud snapshot");
                 auto plan=aps::planSync(remote,local,c.owner);
                 auto merged=std::move(plan.imported);
+                if(c.owner && (plan.upload || merged!=local)) {
+                    auto comparison=aps::compareFiles(remote,local);
+                    bool confirmed=co_await confirmSync(reviewMessage(name,comparison,plan.upload));
+                    if(!confirmed) {
+                        out.message="Sync cancelled. Previously completed files were kept; this file was not changed.";
+                        co_return out;
+                    }
+                }
                 if(plan.upload) {
                     auto body=matjson::Value::object();
                     body["message"]="Sync Attempt Playback: "+name;
@@ -163,6 +217,7 @@ void installPending() {
 }
 void start() {
     installPending();
+    showPrompt();
     if(running) { FLAlertLayer::create("Attempt Sync",status,"OK")->show(); return; }
     try {
         auto mod=Mod::get(); Config c;
@@ -184,6 +239,7 @@ class $modify(SyncMenu,MenuLayer) {
     bool init() {
         if(!MenuLayer::init()) return false;
         installPending();
+        showPrompt();
         auto menu=CCMenu::create(); menu->setPosition({0,0});
         auto sprite=ButtonSprite::create("Sync",0,0,"bigFont.fnt","GJ_button_01.png",0.f,0.65f);
         auto button=CCMenuItemSpriteExtra::create(sprite,this,menu_selector(SyncMenu::onSync));

@@ -1,10 +1,17 @@
-The playback repository is now built in: **hdlolhfff/gd-attempts**, branch **main**. Repository and Branch text fields have been removed, so no slash entry is needed in Geometry Dash.
+**Owner sync now compares files and asks before changing them.**
 
-- **Owner devices:** enable **Upload My Attempts**, enter your own GitHub token with Contents read/write for gd-attempts, and tap Sync. Recordings merge between your devices.
-- **Viewers:** leave Upload My Attempts off (the default). Sync only downloads your playbacks and never uploads the viewer's attempts. Public viewing needs no token; private viewing requires each viewer's own authorized read-only token. The mod does not change repository visibility or embed/share the owner's upload token.
+For every changed level, the Review Playback Sync dialog shows:
+- Local and GitHub file sizes, and which is larger.
+- Attempt counts on each side.
+- Local-only and GitHub-only unique recordings, compared by content rather than device serial numbers.
+- A warning that uploaded recordings are downloadable by anyone when gd-attempts is public.
 
-Download **local.attempt_sync.geode** below and replace the old mod. It includes Windows x64, macOS Intel/Apple Silicon, and iOS/iPadOS arm64.
+Tap **Sync** to combine both histories, or **Cancel** to stop before changing that file. Files completed earlier in the batch are kept. Unchanged files do not prompt. Automatic owner sync still requires confirmation for changed files; comparisons completed during gameplay wait for the main menu. Viewers only download.
 
-**SideStore + JIT-less:** after replacing the mod, fully close GD and use **Geode launcher → Settings → Force Resign**, then launch again. The launcher must sign mods with your device's certificate.
+The source remains built in: **hdlolhfff/gd-attempts**, branch **main**. Larger byte size suggests more stored data but does not necessarily mean more attempts, so the mod also compares recording contents. It merges histories and backs up replaced local files.
 
-Requires GD 2.2081, compatible Geode 5.11.1+ (5.x), and Attempt Playback 1.5.7. The core tests include upload suppression in viewer mode; the build verifies the packaged iOS signature. [Setup instructions](https://github.com/hdlolhfff/attempt-sync#readme).
+The owner has authorized public viewing; GitHub visibility is controlled in the data repository's settings. Public viewing needs no token. Uploads still require the owner's token, which is never embedded in the mod.
+
+Download **local.attempt_sync.geode** below. Includes Windows x64, macOS Intel/Apple Silicon, and iOS/iPadOS arm64. Requires GD 2.2081, compatible Geode 5.11.1+ (5.x), and Attempt Playback 1.5.7.
+
+**SideStore + JIT-less:** after updating, fully close GD and use **Geode launcher → Settings → Force Resign**, then launch again. [Setup instructions](https://github.com/hdlolhfff/attempt-sync#readme).

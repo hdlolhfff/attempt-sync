@@ -36,7 +36,7 @@ jobs:
           run-id: ${{ inputs.run-id }}
           github-token: ${{ github.token }}
           path: dist
-      - name: Publish owner and viewer release
+      - name: Publish reviewed sync release
         env:
           GH_TOKEN: ${{ github.token }}
           TESTED_SHA: ${{ steps.verify.outputs.sha }}
@@ -44,4 +44,4 @@ jobs:
         run: |
           python3 scripts/verify_ios_signature.py dist/local.attempt_sync.geode
           git archive --format=zip --prefix=attempt-sync/ "$TESTED_SHA" -o attempt-sync-source.zip
-          gh release create v1.1.0 dist/local.attempt_sync.geode attempt-sync-source.zip --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" --title 'Attempt Sync 1.1.0 — built-in playback repository' --prerelease --notes-file release/NOTES.md
+          gh release create v1.2.0 dist/local.attempt_sync.geode attempt-sync-source.zip --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" --title 'Attempt Sync 1.2.0 — compare and confirm sync' --prerelease --notes-file release/NOTES.md
