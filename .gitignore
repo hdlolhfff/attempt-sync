@@ -1,0 +1,5 @@
+build/
+.geode/
+*.geode
+apx-test
+.DS_Store

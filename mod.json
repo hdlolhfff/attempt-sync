@@ -1,0 +1,44 @@
+{
+  "geode": "5.11.1",
+  "gd": {
+    "win": "2.2081",
+    "mac": "2.2081",
+    "ios": "2.2081"
+  },
+  "id": "local.attempt_sync",
+  "name": "Attempt Sync",
+  "version": "v1.0.0",
+  "developer": "Attempt Sync",
+  "description": "Sync Attempt Playback ghosts between devices using a private GitHub repository",
+  "dependencies": {
+    "manshoety.attemptplayback": {
+      "version": ">=v1.5.7",
+      "required": true
+    }
+  },
+  "settings": {
+    "repository": {
+      "type": "string",
+      "name": "Repository",
+      "default": "",
+      "description": "Your private GitHub repository, as owner/repository. Initialize it with a README."
+    },
+    "branch": {
+      "type": "string",
+      "name": "Branch",
+      "default": "main"
+    },
+    "github-token": {
+      "type": "string",
+      "name": "GitHub Token",
+      "default": "",
+      "description": "Fine-grained personal access token for this repository only, with Contents read/write. Stored locally in Geode settings, in plain text. Never share your settings file."
+    },
+    "auto-sync": {
+      "type": "bool",
+      "name": "Sync at Main Menu",
+      "default": false,
+      "description": "After configuring GitHub, enable to sync whenever the main menu opens. Imports wait until gameplay ends."
+    }
+  }
+}
