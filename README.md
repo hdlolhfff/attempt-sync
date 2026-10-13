@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.2.1). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.0). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -55,9 +55,9 @@ Versions through 1.2.0 incorrectly treated the packed APX v5 practice segment as
 
 ## Review before owner sync
 
-Before an owner sync changes a file, a **Review Playback Sync** dialog shows its filename, local/GitHub sizes, attempt counts, and the unique attempts present only on each side. It identifies which file is larger but does not assume that byte size equals attempt count. Equal-size files can contain different recordings.
+Before an owner sync changes anything, all changed files are validated and compared. One centered **Review Playback Sync** popup shows the batch file count, uploads/device updates, total local/GitHub sizes and attempts, unique attempts on each side, and the number of larger local files. Size alone does not determine which recordings to keep.
 
-Tap **Sync** to keep both histories and publish any new local data, or **Cancel** to stop the sync before changing that file. Files completed earlier in the same batch remain synced. Conflicts with another device are reread and reviewed again. Unchanged files do not prompt. With automatic sync enabled, changed owner files still require confirmation. Viewers remain download-only.
+Tap **Sync All** once to process the entire batch, or **Cancel** to stop before any uploads or replacements. There is no per-file confirmation. Cloud conflicts are merged using the approved local snapshots and retried without extra prompts. Automatic owner sync also asks once per batch. Unchanged batches do not prompt; viewers remain download-only. Preparation is limited to 128 MiB of local and merged data.
 
 If a comparison finishes during gameplay, it waits until you return to the main menu to show the dialog. Local data changed meanwhile is kept and can be included by syncing again.
 

@@ -24,6 +24,19 @@ inline FileComparison compareFiles(Bytes const& remote, Bytes const& local) {
     return {local.size(),remote.size(),device.attempts.size(),cloud.attempts.size(),localOnly,cloudOnly};
 }
 
+// A single review covers every changed file in this sync job.
+struct BatchReview {
+    size_t files=0,uploads=0,downloads=0,localLarger=0;
+    size_t localBytes=0,cloudBytes=0,localAttempts=0,cloudAttempts=0,localOnly=0,cloudOnly=0;
+    void add(FileComparison const& f,bool upload,bool download) {
+        ++files; uploads+=upload; downloads+=download;
+        localLarger+=f.localBytes>f.cloudBytes;
+        localBytes+=f.localBytes; cloudBytes+=f.cloudBytes;
+        localAttempts+=f.localAttempts; cloudAttempts+=f.cloudAttempts;
+        localOnly+=f.localOnly; cloudOnly+=f.cloudOnly;
+    }
+};
+
 struct SyncPlan {
     Bytes imported;
     bool upload;

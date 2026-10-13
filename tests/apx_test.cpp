@@ -58,6 +58,18 @@ int main() {
     assert(comparison.localOnly==1 && comparison.cloudOnly==0);
     comparison=compareFiles(larger,a);
     assert(comparison.localOnly==0 && comparison.cloudOnly==1);
+    // A 55-file review includes every file, with separate upload/import counts.
+    BatchReview batch;
+    for(int i=0;i<55;++i) batch.add(compareFiles({},b),true,true);
+    assert(batch.files==55 && batch.uploads==55 && batch.downloads==55);
+    assert(batch.localBytes==55*b.size() && batch.cloudBytes==0);
+    assert(batch.localAttempts==55*parse(b).attempts.size());
+    assert(batch.localLarger==55 && batch.localOnly==55 && batch.cloudOnly==0);
+    BatchReview mixed;
+    mixed.add(compareFiles(a,b),true,true);
+    mixed.add(compareFiles(a,{}),false,true);
+    assert(mixed.files==2 && mixed.uploads==1 && mixed.downloads==2);
+    assert(mixed.localOnly==1 && mixed.cloudOnly==2);
     auto view=planSync(a,b,false);
     assert(!view.upload && parse(view.imported).attempts.size()==2);
     assert(!planSync({},b,false).upload);

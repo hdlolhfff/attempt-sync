@@ -7,7 +7,7 @@
   },
   "id": "local.attempt_sync",
   "name": "Attempt Sync",
-  "version": "v1.2.1",
+  "version": "v1.3.0",
   "developer": "Attempt Sync",
   "description": "Sync or view hdlolhfff's Attempt Playback ghosts",
   "dependencies": {
@@ -37,7 +37,7 @@
       "type": "bool",
       "name": "Sync at Main Menu",
       "default": false,
-      "description": "Compare files when the main menu opens. In owner mode, changed files require confirmation before syncing; viewer mode only downloads."
+      "description": "Compare files when the main menu opens. In owner mode, one confirmation covers all changed files before syncing; viewer mode only downloads."
     }
   }
 }

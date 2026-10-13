@@ -2,6 +2,7 @@
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/utils/async.hpp>
+#include <Geode/ui/Popup.hpp>
 #include <fstream>
 #include <set>
 #include <regex>
@@ -21,49 +22,69 @@ std::optional<Outcome> pending;
 std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
 
 struct Prompt {
-    std::string message;
+    aps::BatchReview review;
     arc::oneshot::Sender<bool> reply;
 };
 std::optional<Prompt> prompt;
-class SyncConfirmation : public CCNode, public FLAlertLayerProtocol {
-    arc::oneshot::Sender<bool> reply;
+class SyncConfirmation : public Popup {
+    std::optional<arc::oneshot::Sender<bool>> reply;
+    void answer(bool confirmed) {
+        if(reply) { (void)reply->send(confirmed); reply.reset(); }
+        Popup::onClose(nullptr);
+    }
+    void onClose(CCObject*) override { answer(false); }
+    void onSync(CCObject*) { answer(true); }
+    bool setup(aps::BatchReview const& review) {
+        if(!Popup::init(380.f,290.f)) return false;
+        setTitle("Review Playback Sync");
+        auto row=[&](std::string const& text,float y,float scale=0.85f) {
+            auto label=CCLabelBMFont::create(text.c_str(),"chatFont.fnt");
+            label->setScale(scale);
+            if(label->getContentSize().width*label->getScale()>340.f)
+                label->setScale(340.f/label->getContentSize().width);
+            label->setPosition({190.f,y});
+            m_mainLayer->addChild(label);
+        };
+        row(fmt::format("{} files - one confirmation",review.files),233.f,1.f);
+        row(fmt::format("Upload: {}   Update on device: {}",review.uploads,review.downloads),207.f);
+        row(fmt::format("Local: {:.1f} MiB / {} attempts",double(review.localBytes)/(1024*1024),review.localAttempts),178.f);
+        row(fmt::format("GitHub: {:.1f} MiB / {} attempts",double(review.cloudBytes)/(1024*1024),review.cloudAttempts),155.f);
+        row(fmt::format("{} local-only / {} cloud-only attempts",review.localOnly,review.cloudOnly),132.f);
+        row(fmt::format("Local file larger in {} of {} files",review.localLarger,review.files),109.f);
+        row("Both histories kept. Replaced files backed up.",86.f,0.8f);
+        row(review.uploads?"Uploads are public: anyone can download them.":"Download only: no playbacks will be published.",65.f,0.8f);
+        auto button=[&](char const* text,float x,SEL_MenuHandler handler) {
+            auto sprite=ButtonSprite::create(text,"goldFont.fnt","GJ_button_01.png",0.8f);
+            sprite->setScale(0.85f);
+            auto item=CCMenuItemSpriteExtra::create(sprite,this,handler);
+            m_buttonMenu->addChildAtPosition(item,Anchor::Bottom,{x,29.f});
+        };
+        button("Cancel",-70.f,menu_selector(SyncConfirmation::onClose));
+        button("Sync All",65.f,menu_selector(SyncConfirmation::onSync));
+        return true;
+    }
 public:
     explicit SyncConfirmation(arc::oneshot::Sender<bool> sender):reply(std::move(sender)) {}
-    void FLAlert_Clicked(FLAlertLayer*, bool confirmed) override {
-        (void)reply.send(confirmed);
+    static SyncConfirmation* create(Prompt value) {
+        auto popup=new SyncConfirmation(std::move(value.reply));
+        if(!popup->setup(value.review)) { delete popup; return nullptr; }
+        popup->autorelease(); return popup;
     }
 };
 void showPrompt() {
     if(!prompt || GameManager::get()->m_playLayer || GameManager::get()->m_levelEditorLayer) return;
     auto value=std::move(*prompt); prompt.reset();
-    auto listener=new SyncConfirmation(std::move(value.reply));
-    if(!listener->init()) { delete listener; return; }
-    listener->autorelease();
-    auto alert=FLAlertLayer::create(listener,"Review Playback Sync",value.message,"Cancel","Sync",380.f,true,290.f,0.7f);
-    // The alert owns its delegate. Closing the scene closes the reply channel
-    // and cancels the current file rather than silently proceeding.
-    alert->addChild(listener);
-    alert->show();
+    if(auto popup=SyncConfirmation::create(std::move(value))) popup->show();
 }
-arc::Future<bool> confirmSync(std::string message) {
+arc::Future<bool> confirmSync(aps::BatchReview review) {
     auto [sender,receiver]=arc::oneshot::channel<bool>();
-    queueInMainThread([message=std::move(message),sender=std::move(sender)] mutable {
-        prompt.emplace(Prompt{std::move(message),std::move(sender)});
-        status="Waiting for sync confirmation. Return to the main menu to review.";
+    queueInMainThread([review,sender=std::move(sender)] mutable {
+        prompt.emplace(Prompt{review,std::move(sender)});
+        status="Waiting for Sync All confirmation. Return to the main menu to review.";
         showPrompt();
     });
     auto result=co_await receiver.recv();
     co_return result.isOk() && result.unwrap();
-}
-std::string reviewMessage(std::string const& name, aps::FileComparison const& info, bool upload) {
-    auto size=[](size_t bytes) { return fmt::format("{:.1f} KiB",double(bytes)/1024.0); };
-    std::string text=name+"\n\nLocal: "+size(info.localBytes)+" ("+std::to_string(info.localAttempts)+" attempts)";
-    text+="\nGitHub: "+size(info.cloudBytes)+" ("+std::to_string(info.cloudAttempts)+" attempts)\n";
-    text+=info.localBytes>info.cloudBytes?"Local file is larger.":info.localBytes<info.cloudBytes?"GitHub file is larger.":"File sizes are equal.";
-    text+="\n"+std::to_string(info.localOnly)+" local-only and "+std::to_string(info.cloudOnly)+" cloud-only attempts.\n\n";
-    text+="Size alone does not prove which has more attempts. Sync keeps both histories and backs up replaced local files.\n\n";
-    text+=upload?"Uploading will publish these playbacks to gd-attempts. If the repository is public, anyone can download them.":"This will download GitHub playbacks. No upload is needed.";
-    return text;
 }
 
 aps::Bytes read(fs::path const& p) {
@@ -128,52 +149,84 @@ arc::Future<Outcome> sync(Config c) {
             if(entry.is_regular_file() && safeName(name)) names.insert(name);
         }
         aps::require(names.size()<1000,"Too many level files to sync");
+        struct Prepared { std::string name,sha; fs::path path; aps::Bytes local,merged; bool upload; };
+        std::vector<Prepared> batch;
+        aps::BatchReview review;
+        size_t preparedBytes=0;
+        // Prepare every file before asking once. No uploads or imports happen
+        // until the complete, validated batch has been approved.
         for(auto const& name:names) {
             currentFile=name;
             auto path=c.dir/name;
             auto local=read(path);
+            auto endpoint=base+"/contents/attempts/"+name;
+            auto metadataResponse=co_await request(c).param("ref",commit).get(endpoint);
+            aps::Bytes remote; std::string sha;
+            if(metadataResponse.code()!=404) {
+                auto meta=json(metadataResponse);
+                aps::require(str(meta,"type")=="file","Remote attempt path is not a file");
+                auto size=meta["size"].asInt();
+                aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=int64_t(aps::maxBytes),"Remote attempt exceeds 20 MiB");
+                sha=str(meta,"sha");
+                auto blob=co_await request(c,true).get(base+"/git/blobs/"+sha);
+                ok(blob); remote=blob.data();
+                aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
+                aps::require(remote.size()>=8,"Remote attempt file is empty or truncated");
+            }
+            aps::require(c.owner || !remote.empty(),"Playback missing from the selected cloud snapshot");
+            auto plan=aps::planSync(remote,local,c.owner);
+            if(plan.upload || plan.imported!=local) {
+                review.add(aps::compareFiles(remote,local),plan.upload,plan.imported!=local);
+                preparedBytes+=local.size()+plan.imported.size();
+                aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB. No files were changed.");
+                batch.push_back({name,sha,path,std::move(local),std::move(plan.imported),plan.upload});
+            } else ++out.synced;
+        }
+        if(c.owner && review.files && !(co_await confirmSync(review))) {
+            out.message="Sync cancelled. No files were uploaded or replaced.";
+            co_return out;
+        }
+        for(auto& item:batch) {
+            currentFile=item.name;
+            auto endpoint=base+"/contents/attempts/"+item.name;
             bool done=false;
             for(int retry=0;retry<3 && !done;++retry) {
-                auto endpoint=base+"/contents/attempts/"+name;
-                auto metadataResponse=co_await request(c).param("ref",c.owner?std::string(aps::playbackBranch):commit).get(endpoint);
-                aps::Bytes remote; std::string sha;
-                if(metadataResponse.code()!=404) {
-                    auto meta=json(metadataResponse);
-                    aps::require(str(meta,"type")=="file","Remote attempt path is not a file");
-                    auto size=meta["size"].asInt();
-                    aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=int64_t(aps::maxBytes),"Remote attempt exceeds 20 MiB");
-                    sha=str(meta,"sha");
-                    // Read immutable blob, so content and compare-and-swap SHA agree.
-                    auto blob=co_await request(c,true).get(base+"/git/blobs/"+sha);
-                    ok(blob); remote=blob.data();
-                    aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
-                    aps::require(remote.size()>=8,"Remote attempt file is empty or truncated");
-                }
-                aps::require(c.owner || !remote.empty(),"Playback missing from the selected cloud snapshot");
-                auto plan=aps::planSync(remote,local,c.owner);
-                auto merged=std::move(plan.imported);
-                if(c.owner && (plan.upload || merged!=local)) {
-                    auto comparison=aps::compareFiles(remote,local);
-                    bool confirmed=co_await confirmSync(reviewMessage(name,comparison,plan.upload));
-                    if(!confirmed) {
-                        out.message="Sync cancelled. Previously completed files were kept; this file was not changed.";
-                        co_return out;
-                    }
-                }
-                if(plan.upload) {
+                if(item.upload) {
                     auto body=matjson::Value::object();
-                    body["message"]="Sync Attempt Playback: "+name;
+                    body["message"]="Sync Attempt Playback: "+item.name;
                     body["branch"]=aps::playbackBranch;
-                    body["content"]=aps::base64(merged);
-                    if(!sha.empty()) body["sha"]=sha;
+                    body["content"]=aps::base64(item.merged);
+                    if(!item.sha.empty()) body["sha"]=item.sha;
                     auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
-                    if(uploaded.code()==409 || uploaded.code()==422) continue;
+                    if(uploaded.code()==409 || uploaded.code()==422) {
+                        // Retain the approved local snapshot, merge cloud additions,
+                        // and retry without another confirmation for this file.
+                        auto response=co_await request(c).param("ref",aps::playbackBranch).get(endpoint);
+                        aps::Bytes remote;
+                        item.sha.clear();
+                        if(response.code()!=404) {
+                            auto meta=json(response);
+                            aps::require(str(meta,"type")=="file","Remote attempt path is not a file");
+                            auto size=meta["size"].asInt();
+                            aps::require(size.isOk() && size.unwrap()>=8 && size.unwrap()<=int64_t(aps::maxBytes),"Remote attempt size invalid");
+                            item.sha=str(meta,"sha");
+                            auto blob=co_await request(c,true).get(base+"/git/blobs/"+item.sha);
+                            ok(blob); remote=blob.data();
+                            aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
+                        }
+                        auto plan=aps::planSync(remote,item.merged,true);
+                        preparedBytes-=item.merged.size();
+                        preparedBytes+=plan.imported.size();
+                        aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB after cloud changes. Retry sync.");
+                        item.merged=std::move(plan.imported); item.upload=plan.upload;
+                        continue;
+                    }
                     ok(uploaded);
                 }
-                if(merged!=local) {
-                    importBytes+=local.size()+merged.size();
-                    aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Completed files will import; sync again to continue.");
-                    out.imports.push_back({path,local,std::move(merged)});
+                if(item.merged!=item.local) {
+                    importBytes+=item.local.size()+item.merged.size();
+                    aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Retry sync.");
+                    out.imports.push_back({item.path,std::move(item.local),std::move(item.merged)});
                 }
                 ++out.synced; done=true;
             }
