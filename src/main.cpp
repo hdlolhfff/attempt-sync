@@ -5,7 +5,7 @@
 #include <fstream>
 #include <set>
 #include <regex>
-#include "apx.hpp"
+#include "sync_policy.hpp"
 
 using namespace geode::prelude;
 namespace fs = std::filesystem;
@@ -15,10 +15,10 @@ using geode::utils::web::WebResponse;
 namespace {
 struct Import { fs::path path; aps::Bytes before, after; };
 struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; int synced=0; };
-struct Config { std::string repo, branch, token; fs::path dir; };
+struct Config { std::string token; fs::path dir; bool owner=false; };
 bool running=false;
 std::optional<Outcome> pending;
-std::string status="Open mod settings to configure GitHub, then tap Sync.";
+std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
 
 aps::Bytes read(fs::path const& p) {
     if(!fs::exists(p)) return {};
@@ -39,10 +39,10 @@ std::string str(matjson::Value const& j,char const* k) {
 }
 WebRequest request(Config const& c,bool raw=false) {
     WebRequest req;
-    req.header("Authorization","Bearer "+c.token)
-       .header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
+    if(!c.token.empty()) req.header("Authorization","Bearer "+c.token);
+    req.header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
        .header("X-GitHub-Api-Version","2022-11-28")
-       .header("User-Agent","AttemptSync/1.0")
+       .header("User-Agent","AttemptSync/1.1")
        .timeout(std::chrono::seconds(45));
     return req;
 }
@@ -58,9 +58,11 @@ arc::Future<Outcome> sync(Config c) {
     Outcome out;
     size_t importBytes=0;
     try {
-        auto base="https://api.github.com/repos/"+c.repo;
+        auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
         // Resolve branch first: a missing repo/branch must not be mistaken for an empty folder.
-        auto branchResponse=co_await request(c).get(base+"/branches/"+c.branch);
+        auto branchResponse=co_await request(c).get(base+"/branches/"+aps::playbackBranch);
+        if(branchResponse.code()==404 && c.token.empty())
+            throw std::runtime_error("gd-attempts is private. Add your own authorized GitHub token in settings to access it.");
         auto branch=json(branchResponse);
         auto commit=str(branch["commit"],"sha");
         auto listResponse=co_await request(c).param("ref",commit).get(base+"/contents/attempts");
@@ -74,7 +76,7 @@ arc::Future<Outcome> sync(Config c) {
             }
         }
         fs::create_directories(c.dir);
-        for(auto const& entry:fs::directory_iterator(c.dir)) {
+        if(c.owner) for(auto const& entry:fs::directory_iterator(c.dir)) {
             auto name=entry.path().filename().string();
             if(entry.is_regular_file() && safeName(name)) names.insert(name);
         }
@@ -85,7 +87,7 @@ arc::Future<Outcome> sync(Config c) {
             bool done=false;
             for(int retry=0;retry<3 && !done;++retry) {
                 auto endpoint=base+"/contents/attempts/"+name;
-                auto metadataResponse=co_await request(c).param("ref",c.branch).get(endpoint);
+                auto metadataResponse=co_await request(c).param("ref",c.owner?std::string(aps::playbackBranch):commit).get(endpoint);
                 aps::Bytes remote; std::string sha;
                 if(metadataResponse.code()!=404) {
                     auto meta=json(metadataResponse);
@@ -97,12 +99,15 @@ arc::Future<Outcome> sync(Config c) {
                     auto blob=co_await request(c,true).get(base+"/git/blobs/"+sha);
                     ok(blob); remote=blob.data();
                     aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
+                    aps::require(remote.size()>=8,"Remote attempt file is empty or truncated");
                 }
-                auto merged=aps::merge(remote,local);
-                if(merged!=remote) {
+                aps::require(c.owner || !remote.empty(),"Playback missing from the selected cloud snapshot");
+                auto plan=aps::planSync(remote,local,c.owner);
+                auto merged=std::move(plan.imported);
+                if(plan.upload) {
                     auto body=matjson::Value::object();
                     body["message"]="Sync Attempt Playback: "+name;
-                    body["branch"]=c.branch;
+                    body["branch"]=aps::playbackBranch;
                     body["content"]=aps::base64(merged);
                     if(!sha.empty()) body["sha"]=sha;
                     auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
@@ -118,7 +123,8 @@ arc::Future<Outcome> sync(Config c) {
             }
             aps::require(done,"Another device kept changing this file. Retry sync.");
         }
-        out.message="Synced "+std::to_string(out.synced)+" level files.";
+        out.message=(c.owner?"Synced ":"Downloaded playbacks for ")+std::to_string(out.synced)+" levels.";
+        if(!c.owner && out.synced==0) out.message="No playbacks published yet. The owner needs to enable Upload My Attempts and sync first.";
     } catch(std::exception const& e) {
         out.failed=true; out.message=e.what();
     }
@@ -160,12 +166,9 @@ void start() {
     if(running) { FLAlertLayer::create("Attempt Sync",status,"OK")->show(); return; }
     try {
         auto mod=Mod::get(); Config c;
-        c.repo=mod->getSettingValue<std::string>("repository");
-        c.branch=mod->getSettingValue<std::string>("branch");
+        c.owner=mod->getSettingValue<bool>("upload-my-attempts");
         c.token=mod->getSettingValue<std::string>("github-token");
-        aps::require(std::regex_match(c.repo,std::regex("[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+")),"Set Repository to owner/repository in this mod's Geode settings.");
-        aps::require(std::regex_match(c.branch,std::regex("[A-Za-z0-9_-]+")),"Use a branch name containing letters, digits, underscores or hyphens.");
-        aps::require(!c.token.empty(),"Add a GitHub token in this mod's Geode settings.");
+        aps::require(!c.owner || !c.token.empty(),"To upload your attempts, add your GitHub token with Contents read/write access to gd-attempts in settings.");
         auto playback=Loader::get()->getLoadedMod("manshoety.attemptplayback");
         aps::require(playback!=nullptr,"Enable Attempt Playback 1.5.7 first.");
         aps::require(playback->getVersion()==VersionInfo(1,5,7),"This sync format was verified for Attempt Playback 1.5.7. Use that version until this mod is updated.");
@@ -189,8 +192,8 @@ class $modify(SyncMenu,MenuLayer) {
         menu->addChild(button); this->addChild(menu,100);
         auto mod=Mod::get();
         if(mod->getSettingValue<bool>("auto-sync") && !running &&
-           !mod->getSettingValue<std::string>("repository").empty() &&
-           !mod->getSettingValue<std::string>("github-token").empty()) start();
+           (!mod->getSettingValue<bool>("upload-my-attempts") ||
+            !mod->getSettingValue<std::string>("github-token").empty())) start();
         return true;
     }
     void onSync(CCObject*) { start(); }

@@ -1,16 +1,10 @@
-Fixes the **“missing code signature”** error that prevented Attempt Sync 1.0.0 from loading on iOS/iPadOS.
+The playback repository is now built in: **hdlolhfff/gd-attempts**, branch **main**. Repository and Branch text fields have been removed, so no slash entry is needed in Geometry Dash.
 
-- Ad-hoc signs the final iOS dylib before packaging.
-- Verifies the packaged signature with Apple's `codesign --verify --strict`.
-- Checks signature presence and executable page hashes again after combining all platforms, and before publishing.
+- **Owner devices:** enable **Upload My Attempts**, enter your own GitHub token with Contents read/write for gd-attempts, and tap Sync. Recordings merge between your devices.
+- **Viewers:** leave Upload My Attempts off (the default). Sync only downloads your playbacks and never uploads the viewer's attempts. Public viewing needs no token; private viewing requires each viewer's own authorized read-only token. The mod does not change repository visibility or embed/share the owner's upload token.
 
-Download **local.attempt_sync.geode** below and replace the older Attempt Sync mod in your Geode launcher, then fully restart GD. This single package includes iOS/iPadOS arm64, macOS Intel/Apple Silicon, and Windows x64. Your Attempt Playback data is unaffected by replacing the mod.
+Download **local.attempt_sync.geode** below and replace the old mod. It includes Windows x64, macOS Intel/Apple Silicon, and iOS/iPadOS arm64.
 
-Requires GD 2.2081, Geode 5.11.1+ (compatible 5.x), and Attempt Playback 1.5.7. Sync setup remains the same: a private GitHub replay-data repository and a fine-grained token with Contents read/write in the mod's settings. Tap Sync on the main menu.
+**SideStore + JIT-less:** after replacing the mod, fully close GD and use **Geode launcher → Settings → Force Resign**, then launch again. The launcher must sign mods with your device's certificate.
 
-The signature checks address the reported load failure. Actual loading on your iPad and sync behavior still need device testing. [Full setup instructions](https://github.com/hdlolhfff/attempt-sync#readme).
-
-
-### SideStore / JIT-less: required device signing
-
-If the error changes to **code signature invalid**, fully close GD, open the **Geode launcher → Settings → Force Resign**, wait for **Resign successful!**, then launch GD again. SideStore JIT-less requires signing with your device's SideStore certificate; the download's ad-hoc signature cannot replace that. If certificate validation fails, refresh/import your SideStore certificate in the launcher and test JIT-less before force resigning. Do not share your signing certificate.
+Requires GD 2.2081, compatible Geode 5.11.1+ (5.x), and Attempt Playback 1.5.7. The core tests include upload suppression in viewer mode; the build verifies the packaged iOS signature. [Setup instructions](https://github.com/hdlolhfff/attempt-sync#readme).

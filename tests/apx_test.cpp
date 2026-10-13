@@ -1,4 +1,4 @@
-#include "../src/apx.hpp"
+#include "../src/sync_policy.hpp"
 #include <cassert>
 #include <iostream>
 #include <random>
@@ -25,6 +25,13 @@ template<class F> void rejects(F fn) { bool failed=false; try { fn(); } catch(st
 int main() {
     auto a=file({attempt(1,10)},{session(1,1)});
     auto b=file({attempt(1,20)},{session(1,1)});
+    auto view=planSync(a,b,false);
+    assert(!view.upload && parse(view.imported).attempts.size()==2);
+    assert(!planSync({},b,false).upload);
+    assert(planSync(a,b,true).upload);
+    assert(!planSync(a,a,true).upload);
+    assert(std::string(playbackRepository)=="hdlolhfff/gd-attempts");
+    assert(std::string(playbackBranch)=="main");
     auto ab=merge(a,b); auto f=parse(ab);
     assert(f.attempts.size()==2 && f.sessions.size()==2);
     assert(u32(f.attempts[1],0)==2 && u32(f.sessions[1],28)==2 && u32(f.sessions[1],40)==2);

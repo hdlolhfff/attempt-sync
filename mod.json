@@ -7,9 +7,9 @@
   },
   "id": "local.attempt_sync",
   "name": "Attempt Sync",
-  "version": "v1.0.1",
+  "version": "v1.1.0",
   "developer": "Attempt Sync",
-  "description": "Sync Attempt Playback ghosts between devices using a private GitHub repository",
+  "description": "Sync or view hdlolhfff's Attempt Playback ghosts",
   "dependencies": {
     "manshoety.attemptplayback": {
       "version": ">=v1.5.7",
@@ -17,28 +17,27 @@
     }
   },
   "settings": {
-    "repository": {
-      "type": "string",
-      "name": "Repository",
-      "default": "",
-      "description": "Your private GitHub repository, as owner/repository. Initialize it with a README."
+    "playback-source": {
+      "type": "title",
+      "name": "Playbacks: hdlolhfff / gd-attempts"
     },
-    "branch": {
-      "type": "string",
-      "name": "Branch",
-      "default": "main"
+    "upload-my-attempts": {
+      "type": "bool",
+      "name": "Upload My Attempts",
+      "default": false,
+      "description": "Enable only on your own devices to sync your attempts to hdlolhfff/gd-attempts. Leave off to download and view published playbacks only. Uploads require a GitHub token with Contents read/write access."
     },
     "github-token": {
       "type": "string",
       "name": "GitHub Token",
       "default": "",
-      "description": "Fine-grained personal access token for this repository only, with Contents read/write. Stored locally in Geode settings, in plain text. Never share your settings file."
+      "description": "Your own GitHub token for hdlolhfff/gd-attempts. Owner uploads need Contents read/write. Viewers need no token if the repository is public; private viewing needs their own authorized read-only token. Stored locally in plain text; do not share it."
     },
     "auto-sync": {
       "type": "bool",
       "name": "Sync at Main Menu",
       "default": false,
-      "description": "After configuring GitHub, enable to sync whenever the main menu opens. Imports wait until gameplay ends."
+      "description": "Sync when the main menu opens. With Upload My Attempts off, this only downloads playbacks."
     }
   }
 }
