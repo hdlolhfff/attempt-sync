@@ -32,12 +32,28 @@ jobs:
           sdk: given
           target: ${{ matrix.target }}
           combine: true
+      - name: Verify packaged iOS signature
+        if: matrix.target == 'iOS'
+        shell: bash
+        run: |
+          python3 scripts/verify_ios_signature.py output/local.attempt_sync.geode
+          python3 - <<'PY'
+          import os, zipfile
+          with zipfile.ZipFile('output/local.attempt_sync.geode') as archive:
+              archive.extract('local.attempt_sync.ios.dylib', os.environ['RUNNER_TEMP'])
+          PY
+          codesign --verify --strict "$RUNNER_TEMP/local.attempt_sync.ios.dylib"
   package:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - uses: actions/checkout@v4
       - uses: geode-sdk/build-geode-mod/combine@a0f7676e6fcd1a584f6d0c1c800239008412defc
         id: package
+      - name: Verify combined package retains the iOS signature
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.build-output }}
+        run: python3 scripts/verify_ios_signature.py "$PACKAGE_DIR/local.attempt_sync.geode"
       - uses: actions/upload-artifact@v4
         with:
           name: Attempt-Sync-All-Platforms
