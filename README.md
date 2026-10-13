@@ -14,6 +14,19 @@ Download the current test build from [Releases](https://github.com/hdlolhfff/att
 
 If an Actions run is still building or fails, there is no validated installable package yet. Check the run before downloading. Source-only ZIP files are not installable mods.
 
+## SideStore / JIT-less loading
+
+JIT-less on a SideStore installation requires the mod to be signed **on your device with the same SideStore certificate used for the launcher**. The ad-hoc signature included in this download is not a trusted SideStore signature. A successful build or `codesign` file check does not prove that iPadOS will accept the library in that app.
+
+After importing/updating this mod:
+
+1. Fully close the running GD game and open the Geode launcher.
+2. Open launcher **Settings**, find the **JIT-less** controls, and tap **Force Resign**.
+3. Wait for **Resign successful!**, then launch the game from the launcher.
+4. If certificate validation fails, refresh/import the SideStore certificate in those settings, run **Test JIT-Less Mode**, and then **Force Resign** again.
+
+These controls are in the Geode launcher, not the in-game Geode mod menu. The certificate stays on your device; do not send it to anyone. See the [official SideStore/JIT-less guide](https://github.com/geode-sdk/ios-launcher/blob/main/MODERN-IOS-INSTALL.md#jit-less). The launcher's Force Resign operation signs installed mods as well as the game.
+
 ## One-time GitHub setup
 
 1. Create a **private** repository for replay data and initialize it with a README, using the `main` branch. A separate data repo keeps recordings out of this mod's source and build history.
