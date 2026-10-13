@@ -7,7 +7,7 @@
   },
   "id": "local.attempt_sync",
   "name": "Attempt Sync",
-  "version": "v1.3.0",
+  "version": "v1.3.1",
   "developer": "Attempt Sync",
   "description": "Sync or view hdlolhfff's Attempt Playback ghosts",
   "dependencies": {

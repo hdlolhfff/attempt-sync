@@ -1,10 +1,9 @@
-One **Sync All** confirmation now covers the entire playback batch, including 55+ files. Cancel stops before any uploads or replacements.
+Fixes the stale "Waiting for Sync All confirmation" message after approving a batch. Uploads were proceeding, but the displayed status was never updated.
 
-- Larger centered summary text, short rows, and no clipped scrolling paragraphs.
-- Shows total sizes/attempts, files to upload/update, and local-only/cloud-only recordings.
-- Retains the public-upload warning, merged histories, and local backups.
-- Cloud conflicts retry without another prompt; local changes during syncing remain protected.
-- Validates every file before approval. Includes the APX practice format fixes from 1.2.1.
+- Sync All immediately shows approval and a started notification.
+- Status now reports comparing/syncing file N of M and cloud retries.
+- Adds diagnostic progress logs without credentials or playback contents.
+- Preserves one confirmation per batch, public-upload warning, merged histories and backups.
 
 The public build is token-free. SideStore/JIT-less: fully close GD, import the exact **local.attempt_sync.geode** file using **Files → Share → Geode / Geode Launcher**, wait for import confirmation, then use launcher **Settings → Force Resign** and launch GD.
 

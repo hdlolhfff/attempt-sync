@@ -29,7 +29,12 @@ std::optional<Prompt> prompt;
 class SyncConfirmation : public Popup {
     std::optional<arc::oneshot::Sender<bool>> reply;
     void answer(bool confirmed) {
-        if(reply) { (void)reply->send(confirmed); reply.reset(); }
+        if(reply) {
+            status=confirmed?"Sync All approved. Syncing your playback files; please wait.":"Sync cancelled. No files were uploaded or replaced.";
+            log::info("Playback batch confirmation: {}",confirmed?"approved":"cancelled");
+            if(confirmed) Notification::create("Sync All started",NotificationIcon::Info)->show();
+            (void)reply->send(confirmed); reply.reset();
+        }
         Popup::onClose(nullptr);
     }
     void onClose(CCObject*) override { answer(false); }
@@ -85,6 +90,14 @@ arc::Future<bool> confirmSync(aps::BatchReview review) {
     });
     auto result=co_await receiver.recv();
     co_return result.isOk() && result.unwrap();
+}
+
+// Worker progress is delivered to the main thread, just like confirmation UI.
+void progress(std::string message) {
+    queueInMainThread([message=std::move(message)] {
+        status=message;
+        log::info("{}",message);
+    });
 }
 
 aps::Bytes read(fs::path const& p) {
@@ -155,8 +168,10 @@ arc::Future<Outcome> sync(Config c) {
         size_t preparedBytes=0;
         // Prepare every file before asking once. No uploads or imports happen
         // until the complete, validated batch has been approved.
+        size_t reviewed=0;
         for(auto const& name:names) {
             currentFile=name;
+            progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",++reviewed,names.size(),name));
             auto path=c.dir/name;
             auto local=read(path);
             auto endpoint=base+"/contents/attempts/"+name;
@@ -186,8 +201,10 @@ arc::Future<Outcome> sync(Config c) {
             out.message="Sync cancelled. No files were uploaded or replaced.";
             co_return out;
         }
+        size_t processed=0;
         for(auto& item:batch) {
             currentFile=item.name;
+            progress(fmt::format("{} file {} of {}: {}. Please wait; no more confirmation is needed.",c.owner?"Syncing":"Downloading",++processed,batch.size(),item.name));
             auto endpoint=base+"/contents/attempts/"+item.name;
             bool done=false;
             for(int retry=0;retry<3 && !done;++retry) {
@@ -199,6 +216,7 @@ arc::Future<Outcome> sync(Config c) {
                     if(!item.sha.empty()) body["sha"]=item.sha;
                     auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
                     if(uploaded.code()==409 || uploaded.code()==422) {
+                        progress(fmt::format("Retrying file {} of {} after a cloud change: {}.",processed,batch.size(),item.name));
                         // Retain the approved local snapshot, merge cloud additions,
                         // and retry without another confirmation for this file.
                         auto response=co_await request(c).param("ref",aps::playbackBranch).get(endpoint);
@@ -228,6 +246,7 @@ arc::Future<Outcome> sync(Config c) {
                     aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Retry sync.");
                     out.imports.push_back({item.path,std::move(item.local),std::move(item.merged)});
                 }
+                log::info("Completed playback file {} of {}: {}",processed,batch.size(),item.name);
                 ++out.synced; done=true;
             }
             aps::require(done,"Another device kept changing this file. Retry sync.");
