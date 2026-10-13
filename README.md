@@ -20,10 +20,11 @@ JIT-less on a SideStore installation requires the mod to be signed **on your dev
 
 After importing/updating this mod:
 
-1. Fully close the running GD game and open the Geode launcher.
-2. Open launcher **Settings**, find the **JIT-less** controls, and tap **Force Resign**.
-3. Wait for **Resign successful!**, then launch the game from the launcher.
-4. If certificate validation fails, refresh/import the SideStore certificate in those settings, run **Test JIT-Less Mode**, and then **Force Resign** again.
+1. Fully close the running GD game. Save the mod with the exact filename **local.attempt_sync.geode**, then in **Files** use **Share → Geode / Geode Launcher** and wait for import confirmation. This native import stages the library under `unzipped/binaries`; Geode can then preserve the signed library when unpacking the new version. A manual copy into mods or an in-game import can omit that staging step.
+2. Open the Geode launcher.
+3. Open launcher **Settings**, find the **JIT-less** controls, and tap **Force Resign**.
+4. Wait for **Resign successful!**, then launch the game from the launcher.
+5. If certificate validation fails, refresh/import the SideStore certificate in those settings, run **Test JIT-Less Mode**, and then **Force Resign** again.
 
 These controls are in the Geode launcher, not the in-game Geode mod menu. The certificate stays on your device; do not send it to anyone. See the [official SideStore/JIT-less guide](https://github.com/geode-sdk/ios-launcher/blob/main/MODERN-IOS-INSTALL.md#jit-less). The launcher's Force Resign operation signs installed mods as well as the game.
 
