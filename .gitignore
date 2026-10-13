@@ -3,3 +3,5 @@ build/
 *.geode
 apx-test
 .DS_Store
+
+dist/

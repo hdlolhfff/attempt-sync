@@ -2,6 +2,8 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using a private GitHub repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
+Download the initial test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.0.0). All three native builds and core tests passed; in-game testing is still needed.
+
 ## Build and install
 
 1. Open this repository's **Actions → Build Attempt Sync**. Open the latest successful run and download **Attempt-Sync-All-Platforms**. Unzip it to get the `.geode` mod.
