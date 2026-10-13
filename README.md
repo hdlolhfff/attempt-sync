@@ -37,7 +37,7 @@ Sync is **additive**. Deleting ghosts locally does not delete them in the cloud,
 
 ## Limits and verification
 
-- 20 MiB per merged level file, fewer than 1,000 level files. Large histories can exceed GitHub API storage/rate limits; use another storage backend for very large libraries.
+- 20 MiB per merged level file, fewer than 1,000 level files, and 128 MiB of pending imports per batch (sync again to finish larger batches). Large histories can exceed GitHub API storage/rate limits; use another storage backend for very large libraries.
 - Only APX v8, ATT3 v2, and PATH v5 are accepted. Official online level IDs match across devices. Editor/local levels sync when Attempt Playback gives them the same save ID; this mod does not sync the level itself.
 - GitHub credentials are entered by you on each device. This repo does not provision accounts, tokens, or iOS launchers.
 - Core merge tests cover overlapping histories, serial collisions, practice references, repeated sync convergence, malformed/truncated input, and base64 encoding. Actual in-game behavior still needs device testing, particularly iOS importing and compatibility with other gameplay mods.

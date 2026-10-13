@@ -23,7 +23,7 @@ std::string status="Open mod settings to configure GitHub, then tap Sync.";
 aps::Bytes read(fs::path const& p) {
     if(!fs::exists(p)) return {};
     aps::require(fs::is_regular_file(p) && !fs::is_symlink(p),"Attempt file must be a regular file");
-    auto n=fs::file_size(p); aps::require(n<=aps::maxBytes,"Attempt file exceeds 20 MiB");
+    auto n=fs::file_size(p); aps::require(n>=8,"Attempt file is empty or truncated"); aps::require(n<=aps::maxBytes,"Attempt file exceeds 20 MiB");
     std::ifstream in(p,std::ios::binary); aps::require(bool(in),"Cannot open attempt file");
     aps::Bytes b(n); in.read(reinterpret_cast<char*>(b.data()),std::streamsize(n));
     aps::require(bool(in),"Cannot read attempt file"); return b;
@@ -56,6 +56,7 @@ bool safeName(std::string const& n) { return std::regex_match(n,std::regex("[A-Z
 
 arc::Future<Outcome> sync(Config c) {
     Outcome out;
+    size_t importBytes=0;
     try {
         auto base="https://api.github.com/repos/"+c.repo;
         // Resolve branch first: a missing repo/branch must not be mistaken for an empty folder.
@@ -108,7 +109,11 @@ arc::Future<Outcome> sync(Config c) {
                     if(uploaded.code()==409 || uploaded.code()==422) continue;
                     ok(uploaded);
                 }
-                if(merged!=local) out.imports.push_back({path,local,std::move(merged)});
+                if(merged!=local) {
+                    importBytes+=local.size()+merged.size();
+                    aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Completed files will import; sync again to continue.");
+                    out.imports.push_back({path,local,std::move(merged)});
+                }
                 ++out.synced; done=true;
             }
             aps::require(done,"Another device kept changing this file. Retry sync.");
@@ -144,8 +149,9 @@ void installPending() {
         status=out.message;
         if(skipped) status+=" Local files changed during sync; tap Sync again to merge them.";
         if(out.failed) status+=" Completed files were kept; retry to finish.";
-    } catch(std::exception const& e) { status=std::string("Import failed: ")+e.what()+". Original files are in backups."; }
+    } catch(std::exception const& e) { out.failed=true; status=std::string("Import failed: ")+e.what()+". Original files are in backups."; }
     running=false;
+    if(out.failed) FLAlertLayer::create("Attempt Sync",status,"OK")->show();
     Notification::create(out.failed?"Attempt Sync needs attention":"Attempt Sync finished",
                          out.failed?NotificationIcon::Warning:NotificationIcon::Success)->show();
 }
