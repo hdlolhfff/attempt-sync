@@ -37,7 +37,12 @@ jobs:
           # pin the last revision validated for this target and build its
           # matching codegen. Drop the pin when Geode supports a newer GD.
           bindings-ref: f8aec5d1f3df76d840dfd2609f02cef30dc6efdf
-          configure-args: -DSKIP_BUILDING_CODEGEN=OFF
+          # The shared writer token comes from a repository secret and is baked
+          # into the binary only. It is never in this repository; clear or
+          # rotate the secret to ship a viewer-only build.
+          configure-args: >-
+            -DSKIP_BUILDING_CODEGEN=OFF
+            -DATTEMPT_SYNC_SHARED_TOKEN=${{ secrets.ATTEMPT_SYNC_SHARED_TOKEN }}
       - name: Verify packaged iOS signature
         if: matrix.target == 'iOS'
         shell: bash

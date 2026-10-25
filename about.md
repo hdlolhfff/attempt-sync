@@ -1,7 +1,7 @@
 # Attempt Sync
-Playbacks come from **hdlolhfff/gd-attempts**, branch **main**, on Windows, macOS, and iOS/iPadOS. No repository text entry is needed.
+Playbacks sync with **hdlolhfff/gd-attempts**, branch **main**, on Windows, macOS, and iOS/iPadOS. No repository text entry is needed.
 
-On the owner's devices, enable **Upload My Attempts** and enter a GitHub token with Contents read/write for gd-attempts. On viewers' devices, leave uploads off; they only download your ghosts. Public viewing needs no token; private viewing needs the viewer's own authorized read-only token. Never share the owner's upload token.
+Published builds include a shared writer token, so the first launch creates `settings.json` with **Upload My Attempts** on and this device can both read and write immediately. Turn uploads off to make a device read-only. To use your own access instead, become a **collaborator with Write access** on gd-attempts, then paste your own fine-grained token with Contents read/write; a token you paste is never replaced. Public viewing needs no token. Never share your personal token.
 
 Tap Sync on the main menu, or enable Sync at Main Menu. Requires Attempt Playback 1.5.7. Imports keep backups, and deletions do not propagate.
 

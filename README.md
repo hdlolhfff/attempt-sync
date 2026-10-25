@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.3). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -28,20 +28,30 @@ After importing/updating this mod:
 
 These controls are in the Geode launcher, not the in-game Geode mod menu. The certificate stays on your device; do not send it to anyone. See the [official SideStore/JIT-less guide](https://github.com/geode-sdk/ios-launcher/blob/main/MODERN-IOS-INSTALL.md#jit-less). The launcher's Force Resign operation signs installed mods as well as the game.
 
-## Owner setup (hdlolhfff)
+## Read and write on a fresh install
+
+Builds published from this repository carry a shared writer token, so a new download can **read and write** without any setup. On first launch the mod creates `settings.json` with **Upload My Attempts** on and that token filled in, then one **Sync** downloads everyone's ghosts and uploads yours.
+
+- The shared token is baked into the published `.geode` only. It is never committed to this repository, and it is scoped to **hdlolhfff/gd-attempts**.
+- Anyone who has the build can extract that token, so treat the build as a shared repository key. The owner can rotate it to revoke every existing build at once.
+- Turn **Upload My Attempts** off to make a device read-only. A token you paste yourself is never replaced by the built-in one.
+- If builds start failing with HTTP 403/404 during upload, the shared token was rotated or revoked. Update the mod, or paste a current token in settings.
+
+## Writer setup (your own token)
 
 The replay repository is built in: **hdlolhfff/gd-attempts**, branch **main**. There are no Repository or Branch text fields, so you never need to type a slash in GD. Old values from earlier mod versions are ignored.
 
-1. Create a **fine-grained personal access token** at https://github.com/settings/personal-access-tokens/new. Select only **gd-attempts** and grant **Contents: Read and write** (Metadata read is automatic).
-2. Open Geode → Installed → Attempt Sync → Settings. Enable **Upload My Attempts** and paste your token into **GitHub Token**, then tap **Apply**.
-3. Tap **Sync** on the GD main menu. On each of your own devices, enable the same owner switch and provide a token authorized for that repository. These devices merge recordings in both directions.
-4. Optionally enable **Sync at Main Menu**. Return to the main menu and sync after playing before switching devices.
+1. Ask the repository owner to add your GitHub account as a **collaborator with Write access**. A public repository does not allow writes from anyone else.
+2. Create a **fine-grained personal access token** at https://github.com/settings/personal-access-tokens/new. Select only **gd-attempts** and grant **Contents: Read and write** (Metadata read is automatic).
+3. Open Geode → Installed → Attempt Sync → Settings. Enable **Upload My Attempts** and paste your token into **GitHub Token**, then tap **Apply**.
+4. Tap **Sync** on the GD main menu. Every writer merges recordings in both directions.
+5. Optionally enable **Sync at Main Menu**. Return to the main menu and sync after playing before switching devices.
 
-The token stays in Geode's local settings in **plain text**. It is never built into the mod, committed to either repository, or sent to viewers. Do not distribute your token or settings file.
+Tokens stay in Geode's local settings in **plain text**. They are never committed to either repository. Do not share your personal token or settings file; the repository owner can revoke one collaborator without affecting anyone else.
 
 ## Viewer setup
 
-**Upload My Attempts is off by default.** With it off, the mod only downloads playbacks from **hdlolhfff/gd-attempts**; it never sends a write request to GitHub and does not scan local-only levels for uploading. Imported ghosts merge with the viewer's own local ghosts, with backups before any replacement.
+**Upload My Attempts is off by default** in builds without a shared token. With it off, the mod only downloads playbacks from **hdlolhfff/gd-attempts**; it never sends a write request to GitHub and does not scan local-only levels for uploading. Imported ghosts merge with the viewer's own local ghosts, with backups before any replacement.
 
 - For a **public** replay repository, viewers can leave GitHub Token blank and tap **Sync**.
 - For a **private** replay repository, each viewer needs access through their own GitHub account and their own token with **Contents: Read-only** for gd-attempts. The owner must grant access. Do not give viewers the owner's upload token.
@@ -66,7 +76,7 @@ If a comparison finishes during gameplay, it waits until you return to the main 
 - Reads only `manshoety.attemptplayback`'s `attempts/*_attempts.apx` files. Colors, sounds, GD account saves, Eclipse settings, and other mods are unaffected.
 - Combines normal and practice ghost attempts; compares complete attempt payloads, ignoring only local serial numbers and padding. Byte-identical recordings deduplicate, including indistinguishable recordings made independently.
 - Renumbers imported attempts and fixes references in practice sessions. Both devices' distinct practice sessions are kept; differing versions of the same session may appear as separate sessions. Existing cloud practice-session selection is retained.
-- Owner mode uses GitHub file SHAs for compare-and-swap writes. If another device writes concurrently, it rereads and merges, retrying up to three times. Repeated unchanged syncs do not create commits.
+- Writer mode uses GitHub file SHAs for compare-and-swap writes. If another device or friend writes concurrently, it rereads and merges, retrying up to six times. Repeated unchanged syncs do not create commits.
 - Imports downloads only on the main thread, outside gameplay/editor. If you start playing during a request, they wait for your return to the main menu. If local data changed during the request, it skips that import; sync again.
 - Keeps each replaced local file under this mod's save directory in `backups/<timestamp>/`. Backups are retained until you remove them. Recover with GD closed by copying the backup file to Attempt Playback's `attempts` directory.
 - Stops safely on unsupported, malformed, oversized, or legacy files. Open legacy files in Attempt Playback 1.5.7 to migrate them before syncing. Completed files remain synced if a later file fails.
@@ -85,8 +95,8 @@ Sync is **additive**. Deleting ghosts locally does not delete them in the cloud,
 
 - 20 MiB per merged level file, fewer than 1,000 level files, and 128 MiB of pending imports per batch (sync again to finish larger batches). Large histories can exceed GitHub API storage/rate limits; use another storage backend for very large libraries.
 - Only APX v8, ATT3 v2, and PATH v5 are accepted. Official online level IDs match across devices. Editor/local levels sync when Attempt Playback gives them the same save ID; this mod does not sync the level itself.
-- GitHub credentials are entered by you on each device. This repo does not provision accounts, tokens, or iOS launchers.
-- Tests also verify that viewer mode never requests uploads, owner mode uploads new attempts, and the fixed source is correct. Core merge tests cover overlapping histories, serial collisions, practice references, repeated sync convergence, malformed/truncated input, and base64 encoding. Actual in-game behavior still needs device testing, particularly iOS importing and compatibility with other gameplay mods.
+- GitHub credentials are entered by you on each device, except for the shared writer token included in published builds. This repo does not provision accounts, tokens, or iOS launchers.
+- Tests also verify that read-only mode never requests uploads, writer mode uploads new attempts, and the fixed source is correct. Core merge tests cover overlapping histories, serial collisions, practice references, repeated sync convergence, malformed/truncated input, and base64 encoding. Actual in-game behavior still needs device testing, particularly iOS importing and compatibility with other gameplay mods.
 
 Run the platform-independent tests locally:
 
@@ -98,6 +108,8 @@ g++ -std=c++23 -Wall -Wextra -Werror -O2 tests/apx_test.cpp -o apx-test
 GitHub Actions builds the native mod for all requested platforms and combines them into one `.geode`. To build locally, install the Geode CLI and SDK, set `GEODE_SDK`, and run `geode build` using a host/toolchain for the intended platform.
 
 Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
+
+Version 1.4.0 makes a fresh download read **and** write: published builds include a shared writer token, and the first launch creates `settings.json` with uploads enabled. It also retries concurrent writes up to six times and explains missing collaborator access instead of a generic GitHub error.
 
 Version 1.3.3 speeds up sync with one folder listing, parallel playback downloads, and a local unchanged-file cache. See [Faster sync](#faster-sync-133).
 

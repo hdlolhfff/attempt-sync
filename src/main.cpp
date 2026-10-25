@@ -12,6 +12,12 @@
 #include "sync_cache.hpp"
 #include "sync_policy.hpp"
 
+// CI supplies this from a repository secret. Local builds without it ship
+// viewer-only behaviour.
+#ifndef ATTEMPT_SYNC_SHARED_TOKEN
+#define ATTEMPT_SYNC_SHARED_TOKEN ""
+#endif
+
 using namespace geode::prelude;
 namespace fs = std::filesystem;
 using geode::utils::web::WebRequest;
@@ -24,7 +30,19 @@ struct Outcome { std::vector<Import> imports; std::string message; bool failed=f
 struct Config { std::string token; fs::path dir, cache; bool owner=false; };
 bool running=false;
 std::optional<Outcome> pending;
-std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
+std::string status="Playbacks sync with hdlolhfff/gd-attempts. Tap Sync.";
+
+// Install a build's shared writer token once, so a fresh download can both
+// read and write without any setup. A device that already holds a token keeps
+// it, and turning Upload My Attempts off still makes that device read-only.
+void applySharedDefaults() {
+    if(std::string_view(ATTEMPT_SYNC_SHARED_TOKEN).empty()) return;
+    auto mod=Mod::get();
+    if(!mod->getSettingValue<std::string>("github-token").empty()) return;
+    mod->setSettingValue<std::string>("github-token",ATTEMPT_SYNC_SHARED_TOKEN);
+    mod->setSettingValue<bool>("upload-my-attempts",true);
+    log::info("Attempt Sync: applied the built-in writer defaults");
+}
 
 Ref<Notification> syncNotification;
 // One overlay notification is updated in place throughout the job.
@@ -197,6 +215,10 @@ arc::Future<Outcome> sync(Config c) {
         auto branchResponse=co_await request(c).get(base+"/branches/"+aps::playbackBranch);
         if(branchResponse.code()==404 && c.token.empty())
             throw std::runtime_error("gd-attempts is private. Add your own authorized GitHub token in settings to access it.");
+        if(branchResponse.code()==404)
+            throw std::runtime_error("gd-attempts or its main branch was not found. The saved token may be expired or no longer have access to that repository.");
+        if(branchResponse.code()==403)
+            throw std::runtime_error("GitHub refused access (HTTP 403). The token may be rate limited, expired, or not authorized for gd-attempts. Replace it in settings and retry.");
         auto branch=json(branchResponse);
         auto commit=str(branch["commit"],"sha");
         auto cloud=co_await remoteFiles(c,commit);
@@ -293,7 +315,10 @@ arc::Future<Outcome> sync(Config c) {
             progress(fmt::format("{} file {} of {}: {}. Please wait; no more confirmation is needed.",c.owner?"Syncing":"Downloading",processed,batch.size(),item.name),fmt::format("Syncing {} / {}",processed,batch.size()));
             auto endpoint=base+"/contents/attempts/"+item.name;
             bool done=false;
-            for(int retry=0;retry<3 && !done;++retry) {
+            // Several devices can write at once, so conflicts are expected.
+            // Each retry re-reads the file, merges, and rewrites; the approved
+            // local snapshot is never discarded.
+            for(int retry=0;retry<6 && !done;++retry) {
                 if(item.upload) {
                     progress(fmt::format("Uploading file {} of {}: {}.",processed,batch.size(),item.name),
                              fmt::format("Uploading {} / {} ({}%)",processed,batch.size(),(processed-1)*100/batch.size()));
@@ -303,6 +328,12 @@ arc::Future<Outcome> sync(Config c) {
                     body["content"]=aps::base64(item.merged);
                     if(!item.sha.empty()) body["sha"]=item.sha;
                     auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
+                    if(uploaded.code()==403 || uploaded.code()==404) {
+                        auto detail=uploaded.code()==403
+                            ? "the token may be rate limited, expired, or missing Contents: Read and write"
+                            : "the repository, branch, or this account's write access was not found";
+                        throw std::runtime_error("GitHub refused the upload (HTTP "+std::to_string(uploaded.code())+"): "+std::string(detail)+". The repository owner must add this GitHub account as a collaborator with Write access; then replace the token in settings.");
+                    }
                     if(uploaded.code()==409 || uploaded.code()==422) {
                         progress(fmt::format("Retrying file {} of {} after a cloud change: {}.",processed,batch.size(),item.name),fmt::format("Retrying upload {} / {}",processed,batch.size()));
                         // Retain the approved local snapshot, merge cloud additions,
@@ -418,6 +449,7 @@ void start() {
 class $modify(SyncMenu,MenuLayer) {
     bool init() {
         if(!MenuLayer::init()) return false;
+        applySharedDefaults();
         installPending();
         showPrompt();
         auto menu=CCMenu::create(); menu->setPosition({0,0});

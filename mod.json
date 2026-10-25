@@ -7,9 +7,9 @@
   },
   "id": "local.attempt_sync",
   "name": "Attempt Sync",
-  "version": "v1.3.3",
+  "version": "v1.4.0",
   "developer": "Attempt Sync",
-  "description": "Sync or view hdlolhfff's Attempt Playback ghosts",
+  "description": "Sync hdlolhfff's Attempt Playback ghosts in both directions",
   "dependencies": {
     "manshoety.attemptplayback": {
       "version": ">=v1.5.7",
@@ -25,19 +25,19 @@
       "type": "bool",
       "name": "Upload My Attempts",
       "default": false,
-      "description": "Enable on your devices to sync to hdlolhfff/gd-attempts. Changed files show a size/attempt comparison and ask before syncing. Viewers leave this off. Owner uploads need a GitHub token with Contents read/write."
+      "description": "Enable to upload this device's attempts to hdlolhfff/gd-attempts as well as download everyone else's. Changed files show a size/attempt comparison and ask once before syncing. Builds with a built-in writer token enable this automatically on first launch; turn it off to make this device read-only. Your own token needs repository Write access."
     },
     "github-token": {
       "type": "string",
       "name": "GitHub Token",
       "default": "",
-      "description": "Your own GitHub token for hdlolhfff/gd-attempts. Owner uploads need Contents read/write. Viewers need no token if the repository is public; private viewing needs their own authorized read-only token. Stored locally in plain text; do not share it."
+      "description": "Your own GitHub token for hdlolhfff/gd-attempts. Uploading needs Contents read/write plus collaborator Write access on the repository. Viewers need no token when the repository is public; private viewing needs their own authorized read-only token. A built-in token from a shared build is installed once and never overwrites this value. Stored locally in plain text; do not share it."
     },
     "auto-sync": {
       "type": "bool",
       "name": "Sync at Main Menu",
       "default": false,
-      "description": "Compare files when the main menu opens. In owner mode, one confirmation covers all changed files before syncing; viewer mode only downloads."
+      "description": "Compare files when the main menu opens. With Upload My Attempts on, one confirmation covers all changed files before syncing; with it off, the device only downloads."
     }
   }
 }
