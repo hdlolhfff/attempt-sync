@@ -32,9 +32,6 @@ jobs:
           sdk: given
           target: ${{ matrix.target }}
           combine: true
-          # Keep the bindings that match Geode 5.11.1 / GD 2.2081. Bindings main
-          # is currently being updated for GD 2.2091 and breaks the iOS build.
-          bindings-ref: f8aec5d1f3df76d840dfd2609f02cef30dc6efdf
       - name: Verify packaged iOS signature
         if: matrix.target == 'iOS'
         shell: bash
