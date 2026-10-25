@@ -7,7 +7,7 @@ if ("${CMAKE_SYSTEM_NAME}" STREQUAL "iOS" OR IOS)
 elseif(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
-project(AttemptSync VERSION 1.4.0)
+project(AttemptSync VERSION 1.4.1)
 add_library(${PROJECT_NAME} SHARED src/main.cpp)
 # Optional writer token baked into the binary as a first-run default. CI passes
 # it from a repository secret so it never appears in this public repository.

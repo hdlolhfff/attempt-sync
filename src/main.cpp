@@ -26,7 +26,7 @@ using geode::utils::web::WebFuture;
 
 namespace {
 struct Import { fs::path path; aps::Bytes before, after; };
-struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; bool cancelled=false; int synced=0; };
+struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; bool cancelled=false; int synced=0; int skipped=0; };
 struct Config { std::string token; fs::path dir, cache; bool owner=false; };
 bool running=false;
 std::optional<Outcome> pending;
@@ -150,7 +150,7 @@ void progress(std::string message,std::string banner) {
 aps::Bytes read(fs::path const& p) {
     if(!fs::exists(p)) return {};
     aps::require(fs::is_regular_file(p) && !fs::is_symlink(p),"Attempt file must be a regular file");
-    auto n=fs::file_size(p); aps::require(n>=8,"Attempt file is empty or truncated"); aps::require(n<=aps::maxBytes,"Attempt file exceeds 20 MiB");
+    auto n=fs::file_size(p); aps::require(n>=8,"Attempt file is empty or truncated"); aps::require(n<=aps::maxBytes,"Attempt file exceeds 64 MiB");
     std::ifstream in(p,std::ios::binary); aps::require(bool(in),"Cannot open attempt file");
     aps::Bytes b(n); in.read(reinterpret_cast<char*>(b.data()),std::streamsize(n));
     aps::require(bool(in),"Cannot read attempt file"); return b;
@@ -196,7 +196,7 @@ arc::Future<std::map<std::string,Remote>> remoteFiles(Config const& c,std::strin
         auto name=path.substr(prefix.size());
         if(!aps::safeName(name) || str(item,"type")!="blob") continue;
         auto size=item["size"].asInt();
-        aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=std::intmax_t(aps::maxBytes),"Remote attempt size invalid or exceeds 20 MiB");
+        aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=std::intmax_t(aps::maxBytes),"Remote attempt size invalid or exceeds 64 MiB");
         aps::require(files.size()<1000,"GitHub folder listing limit reached (1000 files)");
         files[name]={str(item,"sha"),size_t(size.unwrap())};
     }
@@ -234,6 +234,7 @@ arc::Future<Outcome> sync(Config c) {
         std::vector<Prepared> batch;
         aps::BatchReview review;
         size_t preparedBytes=0;
+        std::vector<std::string> oversized;
         // Prepare every file before asking once. No uploads or imports happen
         // until the complete, validated batch has been approved.
         struct Job {
@@ -251,6 +252,14 @@ arc::Future<Outcome> sync(Config c) {
             size_t end=start,windowBytes=0;
             while(end<order.size() && jobs.size()<maxParallel) {
                 Job job; job.name=order[end]; job.path=c.dir/job.name; currentFile=job.name;
+                // A level past the per-file limit is left untouched instead of
+                // aborting the batch, so one huge history cannot block every
+                // other level.
+                std::error_code sizeError;
+                auto localSize=fs::file_size(job.path,sizeError);
+                if(!sizeError && localSize>aps::maxBytes) {
+                    oversized.push_back(job.name); cache.erase(job.name); ++end; continue;
+                }
                 job.local=read(job.path); job.hash=aps::fingerprint(job.local);
                 auto found=cloud.find(job.name);
                 if(found!=cloud.end()) {
@@ -291,7 +300,7 @@ arc::Future<Outcome> sync(Config c) {
                 if(plan.upload || plan.imported!=job.local) {
                     review.add(aps::compareFiles(bytes,job.local),plan.upload,plan.imported!=job.local);
                     preparedBytes+=job.local.size()+plan.imported.size();
-                    aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB. No files were changed.");
+                    aps::require(preparedBytes<=256*1024*1024,"Sync batch exceeds 256 MiB. No files were changed.");
                     batch.push_back({job.name,job.sha,job.path,std::move(job.local),std::move(plan.imported),plan.upload});
                     cache.erase(job.name);
                 } else {
@@ -354,7 +363,7 @@ arc::Future<Outcome> sync(Config c) {
                         auto plan=aps::planSync(remote,item.merged,true);
                         preparedBytes-=item.merged.size();
                         preparedBytes+=plan.imported.size();
-                        aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB after cloud changes. Retry sync.");
+                        aps::require(preparedBytes<=256*1024*1024,"Sync batch exceeds 256 MiB after cloud changes. Retry sync.");
                         item.merged=std::move(plan.imported); item.upload=plan.upload;
                         continue;
                     }
@@ -371,7 +380,7 @@ arc::Future<Outcome> sync(Config c) {
                 if(!item.upload && !item.sha.empty()) cache[item.name]={item.sha,aps::fingerprint(item.merged)};
                 if(item.merged!=item.local) {
                     importBytes+=item.local.size()+item.merged.size();
-                    aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Retry sync.");
+                    aps::require(importBytes<=256*1024*1024,"Download batch exceeds 256 MiB. Retry sync.");
                     out.imports.push_back({item.path,std::move(item.local),std::move(item.merged)});
                 }
                 progress(fmt::format("Completed file {} of {}: {}.",processed,batch.size(),item.name),
@@ -383,6 +392,13 @@ arc::Future<Outcome> sync(Config c) {
         }
         out.message=(c.owner?"Synced ":"Downloaded playbacks for ")+std::to_string(out.synced)+" levels.";
         if(!c.owner && out.synced==0) out.message="No playbacks published yet. The owner needs to enable Upload My Attempts and sync first.";
+        if(!oversized.empty()) {
+            std::string list;
+            for(size_t i=0;i<oversized.size() && i<3;++i) list+=std::string(i?", ":"")+oversized[i];
+            if(oversized.size()>3) list+=", and more";
+            out.skipped=int(oversized.size());
+            out.message+=" Skipped "+std::to_string(oversized.size())+" level(s) over 64 MiB ("+list+"). Those files were left unchanged.";
+        }
         aps::saveCache(c.cache,cache);
     } catch(std::exception const& e) {
         aps::saveCache(c.cache,cache);
@@ -415,13 +431,14 @@ void installPending() {
         }
         status=out.message;
         if(skipped) status+=" Local files changed during sync; tap Sync again to merge them.";
-        if(out.failed) status+=" Completed files were kept; retry to finish.";
+        if(out.failed) status+=". Completed files were kept; retry to finish.";
     } catch(std::exception const& e) { out.failed=true; status=std::string("Import failed: ")+e.what()+". Original files are in backups."; }
     running=false;
-    if(out.failed) FLAlertLayer::create("Attempt Sync",status,"OK")->show();
+    if(out.failed || out.skipped) FLAlertLayer::create("Attempt Sync",status,"OK")->show();
     finishProgress(out.failed?"Attempt Sync needs attention":out.cancelled?"Attempt Sync cancelled":
+                   out.skipped?fmt::format("Attempt Sync: {} levels synced, {} skipped",out.synced,out.skipped):
                    fmt::format("Attempt Sync finished: {} levels",out.synced),
-                   (out.failed || skipped)?NotificationIcon::Warning:out.cancelled?NotificationIcon::Info:NotificationIcon::Success);
+                   (out.failed || skipped || out.skipped)?NotificationIcon::Warning:out.cancelled?NotificationIcon::Info:NotificationIcon::Success);
 }
 void start() {
     installPending();

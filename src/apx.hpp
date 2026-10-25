@@ -8,7 +8,7 @@
 
 namespace aps {
 using Bytes = std::vector<uint8_t>;
-constexpr size_t maxBytes = 20 * 1024 * 1024;
+constexpr size_t maxBytes = 64 * 1024 * 1024;
 inline void require(bool b, const char* s) { if (!b) throw std::runtime_error(s); }
 inline uint32_t u32(Bytes const& b, size_t p) {
     require(p <= b.size() && b.size()-p >= 4, "Truncated APX data");
@@ -40,7 +40,7 @@ inline void track(Bytes const& b, size_t& p, uint32_t count) {
 }
 inline File parse(Bytes const& b) {
     File f; if(b.empty()) return f;
-    require(b.size()<=maxBytes,"APX file exceeds 20 MiB sync limit");
+    require(b.size()<=maxBytes,"APX file exceeds 64 MiB sync limit");
     require(b.size()>=8 && std::string(b.begin(),b.begin()+4)=="APX2","Invalid APX magic");
     require(u32(b,4)==8,"Only APX v8 is supported; open the level in Attempt Playback 1.5.7 first");
     size_t p=8;
@@ -72,7 +72,7 @@ inline File parse(Bytes const& b) {
     return f;
 }
 inline void chunk(Bytes& out,uint32_t type,Bytes const& b) {
-    require(out.size()+8+b.size()<=maxBytes,"Merged APX exceeds 20 MiB sync limit");
+    require(out.size()+8+b.size()<=maxBytes,"Merged APX exceeds 64 MiB sync limit");
     append32(out,type); append32(out,uint32_t(b.size())); out.insert(out.end(),b.begin(),b.end());
 }
 // Remote is the baseline so repeated syncs do not continually reorder serials.

@@ -44,4 +44,4 @@ jobs:
         run: |
           python3 scripts/verify_ios_signature.py dist/local.attempt_sync.geode
           git archive --format=zip --prefix=attempt-sync/ "$TESTED_SHA" -o attempt-sync-source.zip
-          gh release create v1.4.0 dist/local.attempt_sync.geode attempt-sync-source.zip --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" --title 'Attempt Sync 1.4.0 - read and write out of the box' --prerelease --notes-file release/NOTES.md
+          gh release create v1.4.1 dist/local.attempt_sync.geode attempt-sync-source.zip --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" --title 'Attempt Sync 1.4.1 - bigger levels sync' --prerelease --notes-file release/NOTES.md

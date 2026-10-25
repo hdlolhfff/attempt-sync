@@ -67,7 +67,7 @@ Versions through 1.2.0 incorrectly treated the packed APX v5 practice segment as
 
 Before an owner sync changes anything, all changed files are validated and compared. One centered **Review Playback Sync** popup shows the batch file count, uploads/device updates, total local/GitHub sizes and attempts, unique attempts on each side, and the number of larger local files. Size alone does not determine which recordings to keep.
 
-Tap **Sync All** once to process the entire batch, or **Cancel** to stop before any uploads or replacements. There is no per-file confirmation. Cloud conflicts are merged using the approved local snapshots and retried without extra prompts. Automatic owner sync also asks once per batch. Unchanged batches do not prompt; viewers remain download-only. Preparation is limited to 128 MiB of local and merged data.
+Tap **Sync All** once to process the entire batch, or **Cancel** to stop before any uploads or replacements. There is no per-file confirmation. Cloud conflicts are merged using the approved local snapshots and retried without extra prompts. Automatic writer sync also asks once per batch. Unchanged batches do not prompt; read-only devices remain download-only. Preparation is limited to 256 MiB of local and merged data.
 
 If a comparison finishes during gameplay, it waits until you return to the main menu to show the dialog. Local data changed meanwhile is kept and can be included by syncing again.
 
@@ -93,7 +93,7 @@ Sync is **additive**. Deleting ghosts locally does not delete them in the cloud,
 
 ## Limits and verification
 
-- 20 MiB per merged level file, fewer than 1,000 level files, and 128 MiB of pending imports per batch (sync again to finish larger batches). Large histories can exceed GitHub API storage/rate limits; use another storage backend for very large libraries.
+- 64 MiB per level file, fewer than 1,000 level files, and 256 MiB of pending imports per batch (sync again to finish larger batches). A level above 64 MiB is skipped and reported, leaving that file untouched, instead of failing the whole batch. Large histories can approach GitHub API storage/rate limits; use another storage backend for very large libraries.
 - Only APX v8, ATT3 v2, and PATH v5 are accepted. Official online level IDs match across devices. Editor/local levels sync when Attempt Playback gives them the same save ID; this mod does not sync the level itself.
 - GitHub credentials are entered by you on each device, except for the shared writer token included in published builds. This repo does not provision accounts, tokens, or iOS launchers.
 - Tests also verify that read-only mode never requests uploads, writer mode uploads new attempts, and the fixed source is correct. Core merge tests cover overlapping histories, serial collisions, practice references, repeated sync convergence, malformed/truncated input, and base64 encoding. Actual in-game behavior still needs device testing, particularly iOS importing and compatibility with other gameplay mods.
@@ -108,6 +108,8 @@ g++ -std=c++23 -Wall -Wextra -Werror -O2 tests/apx_test.cpp -o apx-test
 GitHub Actions builds the native mod for all requested platforms and combines them into one `.geode`. To build locally, install the Geode CLI and SDK, set `GEODE_SDK`, and run `geode build` using a host/toolchain for the intended platform.
 
 Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
+
+Version 1.4.1 raises the per-level limit from 20 MiB to 64 MiB and skips an oversized level with a clear report instead of aborting the whole batch, so one huge history cannot block every other level. Batch memory limits rise to 256 MiB. GitHub permission and export errors now end with proper punctuation, and skipped levels are reported in the completion notification.
 
 Version 1.4.0 makes a fresh download read **and** write: published builds include a shared writer token, and the first launch creates `settings.json` with uploads enabled. It also retries concurrent writes up to six times and explains missing collaborator access instead of a generic GitHub error.
 
