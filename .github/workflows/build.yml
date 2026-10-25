@@ -32,9 +32,10 @@ jobs:
           sdk: given
           target: ${{ matrix.target }}
           combine: true
-          # Bindings main is being updated for GD 2.2091 and currently breaks
-          # iOS. Use the last revision validated with Geode 5.11.1 / GD 2.2081,
-          # and build its matching codegen instead of downloading the latest.
+          # Geode 5.11.1 targets GD 2.2081. Bindings main now contains
+          # unreleased GD 2.2091 work and no longer builds against 2.2081, so
+          # pin the last revision validated for this target and build its
+          # matching codegen. Drop the pin when Geode supports a newer GD.
           bindings-ref: f8aec5d1f3df76d840dfd2609f02cef30dc6efdf
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF
       - name: Verify packaged iOS signature
