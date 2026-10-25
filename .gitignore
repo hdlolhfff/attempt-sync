@@ -2,6 +2,9 @@ build/
 .geode/
 *.geode
 apx-test
+apx-test.exe
+apx-test.pdb
+apx_test.lib
 .DS_Store
 
 dist/

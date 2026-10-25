@@ -3,20 +3,25 @@
 #include <Geode/utils/web.hpp>
 #include <Geode/utils/async.hpp>
 #include <Geode/ui/Popup.hpp>
+#include <arc/future/Join.hpp>
+#include <cstdint>
 #include <fstream>
 #include <set>
-#include <regex>
+#include <map>
+#include <string_view>
+#include "sync_cache.hpp"
 #include "sync_policy.hpp"
 
 using namespace geode::prelude;
 namespace fs = std::filesystem;
 using geode::utils::web::WebRequest;
 using geode::utils::web::WebResponse;
+using geode::utils::web::WebFuture;
 
 namespace {
 struct Import { fs::path path; aps::Bytes before, after; };
 struct Outcome { std::vector<Import> imports; std::string message; bool failed=false; bool cancelled=false; int synced=0; };
-struct Config { std::string token; fs::path dir; bool owner=false; };
+struct Config { std::string token; fs::path dir, cache; bool owner=false; };
 bool running=false;
 std::optional<Outcome> pending;
 std::string status="Playbacks come from hdlolhfff/gd-attempts. Tap Sync to download.";
@@ -146,7 +151,7 @@ WebRequest request(Config const& c,bool raw=false) {
     if(!c.token.empty()) req.header("Authorization","Bearer "+c.token);
     req.header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
        .header("X-GitHub-Api-Version","2022-11-28")
-       .header("User-Agent","AttemptSync/1.2")
+       .header("User-Agent","AttemptSync/1.3.3")
        .timeout(std::chrono::seconds(45));
     return req;
 }
@@ -156,13 +161,37 @@ void ok(WebResponse const& r) {
 matjson::Value json(WebResponse const& r) {
     ok(r); auto j=r.json(); aps::require(j.isOk(),"Invalid GitHub JSON"); return j.unwrap();
 }
-bool safeName(std::string const& n) { return std::regex_match(n,std::regex("[A-Za-z0-9_-]+_attempts\\.apx")); }
+struct Remote { std::string sha; size_t size=0; };
+// One tree request replaces a metadata request per level during compare.
+arc::Future<std::map<std::string,Remote>> remoteFiles(Config const& c,std::string const& commit) {
+    auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
+    auto response=co_await request(c).param("recursive","1").get(base+"/git/trees/"+commit);
+    std::map<std::string,Remote> files;
+    if(response.code()==404) co_return files;
+    auto tree=json(response);
+    aps::require(!tree["truncated"].asBool().unwrapOr(false),"GitHub repository tree is too large to list");
+    auto const& items=tree["tree"]; aps::require(items.isArray(),"Unexpected GitHub tree response");
+    constexpr std::string_view prefix="attempts/";
+    for(auto const& item:items) {
+        auto path=str(item,"path");
+        if(!std::string_view(path).starts_with(prefix)) continue;
+        auto name=path.substr(prefix.size());
+        if(!aps::safeName(name) || str(item,"type")!="blob") continue;
+        auto size=item["size"].asInt();
+        aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=std::intmax_t(aps::maxBytes),"Remote attempt size invalid or exceeds 20 MiB");
+        aps::require(files.size()<1000,"GitHub folder listing limit reached (1000 files)");
+        files[name]={str(item,"sha"),size_t(size.unwrap())};
+    }
+    co_return files;
+}
 
 arc::Future<Outcome> sync(Config c) {
     Outcome out;
     size_t importBytes=0;
     std::string currentFile;
+    aps::Cache cache;
     try {
+        cache=aps::loadCache(c.cache);
         auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
         // Resolve branch first: a missing repo/branch must not be mistaken for an empty folder.
         auto branchResponse=co_await request(c).get(base+"/branches/"+aps::playbackBranch);
@@ -170,20 +199,13 @@ arc::Future<Outcome> sync(Config c) {
             throw std::runtime_error("gd-attempts is private. Add your own authorized GitHub token in settings to access it.");
         auto branch=json(branchResponse);
         auto commit=str(branch["commit"],"sha");
-        auto listResponse=co_await request(c).param("ref",commit).get(base+"/contents/attempts");
+        auto cloud=co_await remoteFiles(c,commit);
         std::set<std::string> names;
-        if(listResponse.code()!=404) {
-            auto list=json(listResponse); aps::require(list.isArray(),"GitHub attempts path must be a folder");
-            aps::require(list.size()<1000,"GitHub folder listing limit reached (1000 files)");
-            for(auto const& item:list) {
-                auto n=str(item,"name");
-                if(str(item,"type")=="file" && safeName(n)) names.insert(n);
-            }
-        }
+        for(auto const& item:cloud) names.insert(item.first);
         fs::create_directories(c.dir);
         if(c.owner) for(auto const& entry:fs::directory_iterator(c.dir)) {
             auto name=entry.path().filename().string();
-            if(entry.is_regular_file() && safeName(name)) names.insert(name);
+            if(entry.is_regular_file() && aps::safeName(name)) names.insert(name);
         }
         aps::require(names.size()<1000,"Too many level files to sync");
         struct Prepared { std::string name,sha; fs::path path; aps::Bytes local,merged; bool upload; };
@@ -192,36 +214,73 @@ arc::Future<Outcome> sync(Config c) {
         size_t preparedBytes=0;
         // Prepare every file before asking once. No uploads or imports happen
         // until the complete, validated batch has been approved.
-        size_t reviewed=0;
-        for(auto const& name:names) {
-            currentFile=name;
-            ++reviewed;
-            progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",reviewed,names.size(),name),fmt::format("Comparing {} / {}",reviewed,names.size()));
-            auto path=c.dir/name;
-            auto local=read(path);
-            auto endpoint=base+"/contents/attempts/"+name;
-            auto metadataResponse=co_await request(c).param("ref",commit).get(endpoint);
-            aps::Bytes remote; std::string sha;
-            if(metadataResponse.code()!=404) {
-                auto meta=json(metadataResponse);
-                aps::require(str(meta,"type")=="file","Remote attempt path is not a file");
-                auto size=meta["size"].asInt();
-                aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=int64_t(aps::maxBytes),"Remote attempt exceeds 20 MiB");
-                sha=str(meta,"sha");
-                auto blob=co_await request(c,true).get(base+"/git/blobs/"+sha);
-                ok(blob); remote=blob.data();
-                aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
-                aps::require(remote.size()>=8,"Remote attempt file is empty or truncated");
+        struct Job {
+            std::string name; fs::path path; aps::Bytes local; uint64_t hash=0;
+            std::string sha; size_t size=0; bool cached=false,download=false;
+        };
+        std::vector<std::string> order(names.begin(),names.end());
+        size_t reviewed=0,cachedCount=0;
+        for(size_t start=0;start<order.size();) {
+            // Fetch a small window of blobs concurrently. Small files fill the
+            // window; large blobs shrink it so peak memory stays bounded.
+            constexpr size_t maxParallel=8,maxWindowBytes=16*1024*1024;
+            std::vector<Job> jobs;
+            std::vector<WebFuture> futures;
+            size_t end=start,windowBytes=0;
+            while(end<order.size() && jobs.size()<maxParallel) {
+                Job job; job.name=order[end]; job.path=c.dir/job.name; currentFile=job.name;
+                job.local=read(job.path); job.hash=aps::fingerprint(job.local);
+                auto found=cloud.find(job.name);
+                if(found!=cloud.end()) {
+                    aps::require(found->second.size>=8,"Remote attempt file is empty or truncated");
+                    job.sha=found->second.sha; job.size=found->second.size;
+                    auto entry=cache.find(job.name);
+                    job.cached=entry!=cache.end() && entry->second.sha==job.sha && entry->second.hash==job.hash;
+                    if(!job.cached) {
+                        // Public viewers read blob bytes from the CDN so large
+                        // first syncs do not exhaust the 60-request API quota.
+                        auto blobUrl=c.token.empty()
+                            ? "https://raw.githubusercontent.com/"+std::string(aps::playbackRepository)+"/"+commit+"/attempts/"+job.name
+                            : base+"/git/blobs/"+job.sha;
+                        futures.push_back(request(c,true).get(blobUrl));
+                        job.download=true; windowBytes+=job.size;
+                    }
+                }
+                jobs.push_back(std::move(job));
+                ++end;
+                if(windowBytes>=maxWindowBytes) break;
             }
-            aps::require(c.owner || !remote.empty(),"Playback missing from the selected cloud snapshot");
-            auto plan=aps::planSync(remote,local,c.owner);
-            if(plan.upload || plan.imported!=local) {
-                review.add(aps::compareFiles(remote,local),plan.upload,plan.imported!=local);
-                preparedBytes+=local.size()+plan.imported.size();
-                aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB. No files were changed.");
-                batch.push_back({name,sha,path,std::move(local),std::move(plan.imported),plan.upload});
-            } else ++out.synced;
+            auto responses=co_await arc::joinAll(std::move(futures));
+            size_t next=0;
+            for(auto& job:jobs) {
+                currentFile=job.name;
+                ++reviewed;
+                progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",reviewed,order.size(),job.name),fmt::format("Comparing {} / {}",reviewed,order.size()));
+                if(job.cached) { ++out.synced; ++cachedCount; continue; }
+                aps::Bytes bytes;
+                if(job.download) {
+                    auto& blob=responses[next++];
+                    ok(blob); bytes=std::move(blob).data();
+                    aps::require(bytes.size()==job.size,"Remote blob size mismatch");
+                    aps::require(bytes.size()>=8,"Remote attempt file is empty or truncated");
+                }
+                aps::require(c.owner || !bytes.empty(),"Playback missing from the selected cloud snapshot");
+                auto plan=aps::planSync(bytes,job.local,c.owner);
+                if(plan.upload || plan.imported!=job.local) {
+                    review.add(aps::compareFiles(bytes,job.local),plan.upload,plan.imported!=job.local);
+                    preparedBytes+=job.local.size()+plan.imported.size();
+                    aps::require(preparedBytes<=128*1024*1024,"Sync batch exceeds 128 MiB. No files were changed.");
+                    batch.push_back({job.name,job.sha,job.path,std::move(job.local),std::move(plan.imported),plan.upload});
+                    cache.erase(job.name);
+                } else {
+                    ++out.synced;
+                    if(!job.sha.empty()) cache[job.name]={job.sha,job.hash};
+                }
+            }
+            start=end;
         }
+        aps::saveCache(c.cache,cache);
+        if(cachedCount) log::info("Playback sync: {} unchanged level files skipped",cachedCount);
         if(c.owner && review.files && !(co_await confirmSync(review))) {
             out.cancelled=true;
             out.message="Sync cancelled. No files were uploaded or replaced.";
@@ -269,7 +328,16 @@ arc::Future<Outcome> sync(Config c) {
                         continue;
                     }
                     ok(uploaded);
+                    // The write response carries the new blob SHA, so the next
+                    // sync can recognize this level without downloading it.
+                    if(auto body=uploaded.json(); body.isOk()) {
+                        auto sha=body.unwrap()["content"]["sha"].asString();
+                        if(sha.isOk()) cache[item.name]={sha.unwrap(),aps::fingerprint(item.merged)};
+                    }
                 }
+                // No upload means `item.sha` still identifies the cloud blob this
+                // merged file was built from; remember it to skip later downloads.
+                if(!item.upload && !item.sha.empty()) cache[item.name]={item.sha,aps::fingerprint(item.merged)};
                 if(item.merged!=item.local) {
                     importBytes+=item.local.size()+item.merged.size();
                     aps::require(importBytes<=128*1024*1024,"Download batch exceeds 128 MiB. Retry sync.");
@@ -284,7 +352,9 @@ arc::Future<Outcome> sync(Config c) {
         }
         out.message=(c.owner?"Synced ":"Downloaded playbacks for ")+std::to_string(out.synced)+" levels.";
         if(!c.owner && out.synced==0) out.message="No playbacks published yet. The owner needs to enable Upload My Attempts and sync first.";
+        aps::saveCache(c.cache,cache);
     } catch(std::exception const& e) {
+        aps::saveCache(c.cache,cache);
         out.failed=true; out.message=(currentFile.empty()?std::string():currentFile+": ")+e.what();
     }
     co_return out;
@@ -335,6 +405,7 @@ void start() {
         aps::require(playback!=nullptr,"Enable Attempt Playback 1.5.7 first.");
         aps::require(playback->getVersion()==VersionInfo(1,5,7),"This sync format was verified for Attempt Playback 1.5.7. Use that version until this mod is updated.");
         c.dir=playback->getSaveDir()/"attempts";
+        c.cache=mod->getSaveDir()/"sync-cache.txt";
         running=true; status="Syncing with GitHub. You can keep playing; downloads apply at the main menu.";
         showLiveProgress("Attempt Sync: connecting...");
         async::spawn(sync(std::move(c)),[](Outcome out) {

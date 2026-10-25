@@ -1,5 +1,8 @@
 #include "../src/sync_policy.hpp"
+#include "../src/sync_cache.hpp"
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <cstring>
@@ -110,5 +113,23 @@ int main() {
         auto damaged=a; damaged[rng()%damaged.size()]=uint8_t(rng());
         try { auto m=merge(a,damaged); parse(m); } catch(std::exception const&) {}
     }
-    std::cout<<"APX merge, serial remapping, practice sessions, convergence, truncation, malformed input, and base64 checks passed.\n";
+    // Unchanged-file cache: name validation, hashing, and round-trip parsing.
+    assert(safeName("100080980_attempts.apx") && safeName("064e00d68c351e17_attempts.apx"));
+    assert(!safeName("_attempts.apx") && !safeName("100080980_attempts.apx.bak"));
+    assert(!safeName("a/b_attempts.apx") && !safeName("a b_attempts.apx"));
+    assert(fingerprint(Bytes{1,2,3})==fingerprint(Bytes{1,2,3}));
+    assert(fingerprint(Bytes{1,2,3})!=fingerprint(Bytes{1,2,4}));
+    auto cachePath=std::filesystem::temp_directory_path()/"attempt-sync-cache-test.txt";
+    std::filesystem::remove(cachePath);
+    assert(loadCache(cachePath).empty());
+    Cache cached;
+    cached["100080980_attempts.apx"]={"0123456789012345678901234567890123456789",0x123456789abcdef0ull};
+    saveCache(cachePath,cached);
+    auto reloaded=loadCache(cachePath);
+    assert(reloaded.size()==1 && reloaded["100080980_attempts.apx"].sha==cached["100080980_attempts.apx"].sha);
+    assert(reloaded["100080980_attempts.apx"].hash==cached["100080980_attempts.apx"].hash);
+    { std::ofstream out(cachePath,std::ios::trunc); out<<"../evil_attempts.apx 0123456789012345678901234567890123456789 1\n"; }
+    assert(loadCache(cachePath).empty());
+    std::filesystem::remove(cachePath);
+    std::cout<<"APX merge, serial remapping, practice sessions, convergence, truncation, malformed input, base64, and sync cache checks passed.\n";
 }

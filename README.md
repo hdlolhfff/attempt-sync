@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.2). All three native builds and core tests passed; in-game testing is still needed.
+Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases/tag/v1.3.3). All three native builds and core tests passed; in-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -73,6 +73,14 @@ If a comparison finishes during gameplay, it waits until you return to the main 
 
 Sync is **additive**. Deleting ghosts locally does not delete them in the cloud, and a later sync can restore them. To remove a level's recordings everywhere, disable automatic sync on all devices, remove its local file on every device and its matching `attempts/…_attempts.apx` in the data repo, then reenable sync. Backups and Git history may retain older data.
 
+## Faster sync (1.3.3)
+
+- Comparison uses one repository tree request instead of a metadata request per level.
+- Playback files download eight at a time, with the window shrinking for large files so memory stays bounded.
+- Token-free public viewing downloads playback bytes from GitHub's raw CDN, so sync needs only two API requests plus one per changed file; uploads and token-authenticated viewing still use the API.
+- `sync-cache.txt` in this mod's save folder records each level's cloud SHA and a hash of the local file. When both are unchanged, that level is skipped without a download. A repeat sync with nothing new needs only the branch and tree requests.
+- Delete `sync-cache.txt` to force every file to be compared again. A missing or stale entry only causes an extra comparison, never a skipped change.
+
 ## Limits and verification
 
 - 20 MiB per merged level file, fewer than 1,000 level files, and 128 MiB of pending imports per batch (sync again to finish larger batches). Large histories can exceed GitHub API storage/rate limits; use another storage backend for very large libraries.
@@ -90,6 +98,8 @@ g++ -std=c++23 -Wall -Wextra -Werror -O2 tests/apx_test.cpp -o apx-test
 GitHub Actions builds the native mod for all requested platforms and combines them into one `.geode`. To build locally, install the Geode CLI and SDK, set `GEODE_SDK`, and run `geode build` using a host/toolchain for the intended platform.
 
 Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
+
+Version 1.3.3 speeds up sync with one folder listing, parallel playback downloads, and a local unchanged-file cache. See [Faster sync](#faster-sync-133).
 
 Version 1.3.2 updates the status immediately after Sync All, and reports comparing/syncing file N of M. Tap the main-menu Sync button during a running job to check current progress. Sync approval, per-file progress, and completion are logged without credentials.
 
