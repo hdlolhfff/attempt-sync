@@ -57,6 +57,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: geode-sdk/build-geode-mod/combine@dce36b35e1c3d9d8af92347760b12eba3caf4004
         id: package
+        with:
+          # The signature verifier reads the packaged dylib with Python zipfile.
+          zstd: false
       - name: Verify combined package retains the iOS signature
         env:
           PACKAGE_DIR: ${{ steps.package.outputs.build-output }}
