@@ -2,7 +2,7 @@
 
 A Geode companion mod that syncs **Attempt Playback 1.6.0** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2091 and Geode 6.0.0.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases). All three native builds and core tests passed; in-game testing is still needed.
+Download the 2.2091 package from [Actions](https://github.com/hdlolhfff/attempt-sync/actions?query=branch%3Acodex%2Fgd-2.2091). In-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
