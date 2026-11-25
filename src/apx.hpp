@@ -42,7 +42,7 @@ inline File parse(Bytes const& b) {
     File f; if(b.empty()) return f;
     require(b.size()<=maxBytes,"APX file exceeds 64 MiB sync limit");
     require(b.size()>=8 && std::string(b.begin(),b.begin()+4)=="APX2","Invalid APX magic");
-    require(u32(b,4)==8,"Only APX v8 is supported; open the level in Attempt Playback 1.5.7 first");
+    require(u32(b,4)==8,"Only APX v8 is supported; open the level in Attempt Playback 1.6.0 first");
     size_t p=8;
     while(p<b.size()) {
         auto type=u32(b,p), n=u32(b,p+4); p+=8;

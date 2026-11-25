@@ -1,6 +1,6 @@
 # Attempt Sync
 
-A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
+A Geode companion mod that syncs **Attempt Playback 1.6.0** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
 
 Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases). All three native builds and core tests passed; in-game testing is still needed.
 
@@ -10,7 +10,7 @@ Download the current test build from [Releases](https://github.com/hdlolhfff/att
 
 1. Open this repository's **Actions → Build Attempt Sync**. Open the latest successful run and download **Attempt-Sync-All-Platforms**. Unzip it to get the `.geode` mod.
 2. Import the `.geode` through your Geode launcher's file-import flow, or put it in your installation's `geode/mods` directory and restart. On iPad/iPhone, use an existing Geode-compatible GD launcher that supports importing local mods. This package is a mod, not an IPA or an App Store app.
-3. Install/enable Attempt Playback **1.5.7** on every device. The sync mod checks the version before accessing its files.
+3. Install/enable Attempt Playback **1.6.0** on every device. The sync mod checks the version before accessing its files.
 
 If an Actions run is still building or fails, there is no validated installable package yet. Check the run before downloading. Source-only ZIP files are not installable mods.
 
@@ -79,7 +79,7 @@ If a comparison finishes during gameplay, it waits until you return to the main 
 - Writer mode uses GitHub file SHAs for compare-and-swap writes. If another device or friend writes concurrently, it rereads and merges, retrying up to six times. Repeated unchanged syncs do not create commits.
 - Imports downloads only on the main thread, outside gameplay/editor. If you start playing during a request, they wait for your return to the main menu. If local data changed during the request, it skips that import; sync again.
 - Keeps each replaced local file under this mod's save directory in `backups/<timestamp>/`. Backups are retained until you remove them. Recover with GD closed by copying the backup file to Attempt Playback's `attempts` directory.
-- Stops safely on unsupported, malformed, oversized, or legacy files. Open legacy files in Attempt Playback 1.5.7 to migrate them before syncing. Completed files remain synced if a later file fails.
+- Stops safely on unsupported, malformed, oversized, or legacy files. Open legacy files in Attempt Playback 1.6.0 to migrate them before syncing. Completed files remain synced if a later file fails.
 
 Sync is **additive**. Deleting ghosts locally does not delete them in the cloud, and a later sync can restore them. To remove a level's recordings everywhere, disable automatic sync on all devices, remove its local file on every device and its matching `attempts/…_attempts.apx` in the data repo, then reenable sync. Backups and Git history may retain older data.
 
@@ -107,7 +107,7 @@ g++ -std=c++23 -Wall -Wextra -Werror -O2 tests/apx_test.cpp -o apx-test
 
 GitHub Actions builds the native mod for all requested platforms and combines them into one `.geode`. To build locally, install the Geode CLI and SDK, set `GEODE_SDK`, and run `geode build` using a host/toolchain for the intended platform.
 
-Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
+Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.6.0). This is an independent companion, not an official Attempt Playback release.
 
 Version 1.4.1 raises the per-level limit from 20 MiB to 64 MiB and skips an oversized level with a clear report instead of aborting the whole batch, so one huge history cannot block every other level. Batch memory limits rise to 256 MiB. GitHub permission and export errors now end with proper punctuation, and skipped levels are reported in the completion notification.
 

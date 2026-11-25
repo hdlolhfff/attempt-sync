@@ -7,7 +7,7 @@ if ("${CMAKE_SYSTEM_NAME}" STREQUAL "iOS" OR IOS)
 elseif(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
-project(AttemptSync VERSION 1.4.1)
+project(AttemptSync VERSION 1.4.2)
 add_library(${PROJECT_NAME} SHARED src/main.cpp)
 # Optional writer token baked into the binary as a first-run default. CI passes
 # it from a repository secret so it never appears in this public repository.
@@ -28,4 +28,4 @@ if(GEODE_TARGET_PLATFORM STREQUAL "iOS")
         VERBATIM
     )
 endif()
-setup_geode_mod(${PROJECT_NAME})
+setup_geode_mod(${PROJECT_NAME} EXTERNALS "manshoety.attemptplayback:1.6.0")

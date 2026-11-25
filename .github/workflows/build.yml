@@ -27,16 +27,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
+      - uses: geode-sdk/build-geode-mod@dce36b35e1c3d9d8af92347760b12eba3caf4004
         with:
           sdk: given
           target: ${{ matrix.target }}
           combine: true
-          # Geode 5.11.1 targets GD 2.2081. Bindings main now contains
-          # unreleased GD 2.2091 work and no longer builds against 2.2081, so
-          # pin the last revision validated for this target and build its
-          # matching codegen. Drop the pin when Geode supports a newer GD.
-          bindings-ref: f8aec5d1f3df76d840dfd2609f02cef30dc6efdf
+          bindings-ref: acb2c10d5de79fecec11e6f91f5e929447738b2e
           # The shared writer token comes from a repository secret and is baked
           # into the binary only. It is never in this repository; clear or
           # rotate the secret to ship a viewer-only build.
@@ -59,7 +55,7 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - uses: geode-sdk/build-geode-mod/combine@a0f7676e6fcd1a584f6d0c1c800239008412defc
+      - uses: geode-sdk/build-geode-mod/combine@dce36b35e1c3d9d8af92347760b12eba3caf4004
         id: package
       - name: Verify combined package retains the iOS signature
         env:

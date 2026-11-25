@@ -1,4 +1,5 @@
 #include <Geode/Geode.hpp>
+#include <asp/fs/std.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/utils/async.hpp>
@@ -413,7 +414,7 @@ void installPending() {
     auto out=std::move(*pending); pending.reset();
     int skipped=0;
     try {
-        auto root=Mod::get()->getSaveDir()/"backups";
+        auto root=(Mod::get()->getSaveDir()/"backups").toStdPath().unwrap();
         for(auto const& item:out.imports) {
             if(read(item.path)!=item.before) { ++skipped; continue; }
             auto backup=root/std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
@@ -450,10 +451,10 @@ void start() {
         c.token=mod->getSettingValue<std::string>("github-token");
         aps::require(!c.owner || !c.token.empty(),"To upload your attempts, add your GitHub token with Contents read/write access to gd-attempts in settings.");
         auto playback=Loader::get()->getLoadedMod("manshoety.attemptplayback");
-        aps::require(playback!=nullptr,"Enable Attempt Playback 1.5.7 first.");
-        aps::require(playback->getVersion()==VersionInfo(1,5,7),"This sync format was verified for Attempt Playback 1.5.7. Use that version until this mod is updated.");
-        c.dir=playback->getSaveDir()/"attempts";
-        c.cache=mod->getSaveDir()/"sync-cache.txt";
+        aps::require(playback!=nullptr,"Enable Attempt Playback 1.6.0 first.");
+        aps::require(playback->getVersion()==VersionInfo(1,6,0),"This sync format was verified for Attempt Playback 1.6.0. Use that version until this mod is updated.");
+        c.dir=(playback->getSaveDir()/"attempts").toStdPath().unwrap();
+        c.cache=(mod->getSaveDir()/"sync-cache.txt").toStdPath().unwrap();
         running=true; status="Syncing with GitHub. You can keep playing; downloads apply at the main menu.";
         showLiveProgress("Attempt Sync: connecting...");
         async::spawn(sync(std::move(c)),[](Outcome out) {
