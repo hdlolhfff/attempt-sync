@@ -1,6 +1,6 @@
 # Attempt Sync
 
-A Geode companion mod that syncs **Attempt Playback 1.6.0** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
+A Geode companion mod that syncs **Attempt Playback 1.6.0** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2091 and Geode 6.0.0.
 
 Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases). All three native builds and core tests passed; in-game testing is still needed.
 
@@ -10,7 +10,7 @@ Download the current test build from [Releases](https://github.com/hdlolhfff/att
 
 1. Open this repository's **Actions → Build Attempt Sync**. Open the latest successful run and download **Attempt-Sync-All-Platforms**. Unzip it to get the `.geode` mod.
 2. Import the `.geode` through your Geode launcher's file-import flow, or put it in your installation's `geode/mods` directory and restart. On iPad/iPhone, use an existing Geode-compatible GD launcher that supports importing local mods. This package is a mod, not an IPA or an App Store app.
-3. Install/enable Attempt Playback **1.6.0** on every device. The sync mod checks the version before accessing its files.
+3. Install and enable Attempt Playback **1.6.0** on every device. The upstream [2.2091 build](https://github.com/manshoety/AttemptPlaybackMod/actions/runs/45539161274) is available under **Build Output** in Actions. The sync mod checks the version before accessing its files.
 
 If an Actions run is still building or fails, there is no validated installable package yet. Check the run before downloading. Source-only ZIP files are not installable mods.
 

@@ -171,7 +171,7 @@ WebRequest request(Config const& c,bool raw=false) {
     req.header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
        .header("X-GitHub-Api-Version","2022-11-28")
        .header("User-Agent","AttemptSync/1.3.3")
-       .timeout(std::chrono::seconds(45));
+       .timeout(asp::Duration::fromSecs(45));
     return req;
 }
 void ok(WebResponse const& r) {
