@@ -2,15 +2,23 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace aps {
 using Bytes = std::vector<uint8_t>;
-constexpr size_t maxBytes = 64 * 1024 * 1024;
+using ByteView = std::span<uint8_t const>;
+constexpr size_t maxBytes = 256 * 1024 * 1024;
+struct APXTooLarge : std::runtime_error {
+    APXTooLarge() : std::runtime_error("APX file exceeds 256 MiB sync limit") {}
+};
+inline void checkAPXSize(uintmax_t size) {
+    if (size > maxBytes) throw APXTooLarge();
+}
 inline void require(bool b, const char* s) { if (!b) throw std::runtime_error(s); }
-inline uint32_t u32(Bytes const& b, size_t p) {
+inline uint32_t u32(ByteView b, size_t p) {
     require(p <= b.size() && b.size()-p >= 4, "Truncated APX data");
     return uint32_t(b[p]) | uint32_t(b[p+1])<<8 | uint32_t(b[p+2])<<16 | uint32_t(b[p+3])<<24;
 }
@@ -19,13 +27,13 @@ inline void put(Bytes& b, size_t p, uint32_t v) {
     for (int i=0;i<4;++i) b[p+i]=uint8_t(v>>(i*8));
 }
 inline void append32(Bytes& b,uint32_t v) { auto p=b.size(); b.resize(p+4); put(b,p,v); }
-inline Bytes slice(Bytes const& b,size_t p,size_t n) {
+inline ByteView slice(ByteView b,size_t p,size_t n) {
     require(p<=b.size() && n<=b.size()-p,"Truncated APX chunk");
-    return Bytes(b.begin()+p,b.begin()+p+n);
+    return b.subspan(p,n);
 }
-struct File { std::vector<Bytes> attempts, sessions; Bytes pathHeader; };
+struct File { std::vector<ByteView> attempts, sessions; ByteView pathHeader; };
 // ATT3 v2 uses fixed-width packed fields; all supported CPUs are little-endian.
-inline void track(Bytes const& b, size_t& p, uint32_t count) {
+inline void track(ByteView b, size_t& p, uint32_t count) {
     auto n=u32(b,p); p+=4;
     require(n<=b.size()-p && count<=10'000'000 && count<=n,"Invalid APX track");
     auto end=p+n;
@@ -38,11 +46,11 @@ inline void track(Bytes const& b, size_t& p, uint32_t count) {
     }
     require(p==end,"Trailing APX track data");
 }
-inline File parse(Bytes const& b) {
+inline File parse(ByteView b) {
     File f; if(b.empty()) return f;
-    require(b.size()<=maxBytes,"APX file exceeds 64 MiB sync limit");
+    checkAPXSize(b.size());
     require(b.size()>=8 && std::string(b.begin(),b.begin()+4)=="APX2","Invalid APX magic");
-    require(u32(b,4)==8,"Only APX v8 is supported; open the level in Attempt Playback 1.5.7 first");
+    require(u32(b,4)==8,"Only APX v8 is supported; open the level in Attempt Playback to migrate the file first");
     size_t p=8;
     while(p<b.size()) {
         auto type=u32(b,p), n=u32(b,p+4); p+=8;
@@ -71,23 +79,41 @@ inline File parse(Bytes const& b) {
     for(auto const& a:f.attempts) require(serials.emplace(u32(a,0),true).second,"Duplicate attempt serial");
     return f;
 }
-inline void chunk(Bytes& out,uint32_t type,Bytes const& b) {
-    require(out.size()+8+b.size()<=maxBytes,"Merged APX exceeds 64 MiB sync limit");
+inline void chunk(Bytes& out,uint32_t type,ByteView b) {
+    checkAPXSize(out.size()+8+b.size());
     append32(out,type); append32(out,uint32_t(b.size())); out.insert(out.end(),b.begin(),b.end());
 }
+// The serial and its adjacent header's padding are local to each device.
+// Compare the remaining bytes directly without copying large recordings.
+struct AttemptLess {
+    bool operator()(ByteView left,ByteView right) const {
+        auto headerOrder=std::lexicographical_compare_three_way(
+            left.begin()+4,left.begin()+13,right.begin()+4,right.begin()+13);
+        if(headerOrder!=0) return headerOrder<0;
+        return std::lexicographical_compare(left.begin()+14,left.end(),right.begin()+14,right.end());
+    }
+};
 // Remote is the baseline so repeated syncs do not continually reorder serials.
 // Compare complete payloads with only the per-device serial/padding normalized.
 inline Bytes merge(Bytes const& remote,Bytes const& local) {
     auto r=parse(remote), l=parse(local);
-    std::vector<Bytes> attempts,sessions;
-    std::map<Bytes,uint32_t> seenAttempts,seenSessions;
+    Bytes out={'A','P','X','2',8,0,0,0};
+    out.reserve(std::min(maxBytes,remote.size()+local.size()+36));
+    std::vector<Bytes> sessions;
+    std::map<ByteView,uint32_t,AttemptLess> seenAttempts;
+    std::map<Bytes,uint32_t> seenSessions;
     std::map<uint32_t,uint32_t> rm,lm,rs,ls;
     auto addAttempts=[&](File const& f,auto& ids) {
         for(auto a:f.attempts) {
-            auto old=u32(a,0); put(a,0,0); a[13]=0;
-            auto [it,added]=seenAttempts.emplace(a,uint32_t(attempts.size()+1));
+            auto old=u32(a,0);
+            auto [it,added]=seenAttempts.emplace(a,uint32_t(seenAttempts.size()+1));
             ids[old]=it->second;
-            if(added) { put(a,0,it->second); attempts.push_back(std::move(a)); }
+            if(added) {
+                auto payload=out.size()+8;
+                chunk(out,0x33545441,a);
+                put(out,payload,it->second);
+                out[payload+13]=0;
+            }
         }
     };
     addAttempts(r,rm); addAttempts(l,lm);
@@ -96,7 +122,8 @@ inline Bytes merge(Bytes const& remote,Bytes const& local) {
         require(it!=ids.end(),"Practice session references a missing attempt"); put(b,p,it->second);
     };
     auto addSessions=[&](File const& f,auto const& ids,auto& sessionIds) {
-        for(auto s:f.sessions) {
+        for(auto view:f.sessions) {
+            Bytes s(view.begin(),view.end());
             auto old=u32(s,0); auto a=u32(s,4), n=u32(s,8);
             put(s,0,0); s[26]=s[27]=0;
             for(uint32_t i=0;i<a;++i) remap(s,28+size_t(i)*4,ids);
@@ -107,19 +134,22 @@ inline Bytes merge(Bytes const& remote,Bytes const& local) {
         }
     };
     addSessions(r,rm,rs); addSessions(l,lm,ls);
-    Bytes out={'A','P','X','2',8,0,0,0};
-    for(auto const& a:attempts) chunk(out,0x33545441,a);
-    Bytes path=r.pathHeader.empty()?l.pathHeader:r.pathHeader;
+    auto header=r.pathHeader.empty()?l.pathHeader:r.pathHeader;
+    Bytes path;
+    if(!header.empty()) path.assign(header.begin(),header.end());
     auto const& sessionIds=r.pathHeader.empty()?ls:rs;
     if(path.empty()) { path.resize(20); put(path,0,5); put(path,8,0xffffffff); put(path,12,0xffffffff); }
     put(path,4,uint32_t(sessions.size())); path[17]=path[18]=path[19]=0;
     for(size_t p:{size_t(8),size_t(12)}) {
         auto it=sessionIds.find(u32(path,p)); put(path,p,it==sessionIds.end()?0xffffffff:it->second);
     }
-    for(auto const& s:sessions) path.insert(path.end(),s.begin(),s.end());
+    for(auto const& s:sessions) {
+        checkAPXSize(out.size()+8+path.size()+s.size());
+        path.insert(path.end(),s.begin(),s.end());
+    }
     chunk(out,0x48544150,path); return out;
 }
-inline std::string base64(Bytes const& b) {
+inline std::string base64(ByteView b) {
     constexpr char t[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string s; s.reserve((b.size()+2)/3*4);
     for(size_t i=0;i<b.size();i+=3) {

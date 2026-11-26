@@ -13,9 +13,7 @@ struct FileComparison {
 inline FileComparison compareFiles(Bytes const& remote, Bytes const& local) {
     auto cloud=parse(remote), device=parse(local);
     auto keys=[](File const& f) {
-        std::set<Bytes> result;
-        for(auto a:f.attempts) { put(a,0,0); a[13]=0; result.insert(std::move(a)); }
-        return result;
+        return std::set<ByteView,AttemptLess>(f.attempts.begin(),f.attempts.end());
     };
     auto cloudKeys=keys(cloud), localKeys=keys(device);
     size_t localOnly=0, cloudOnly=0;

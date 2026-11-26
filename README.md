@@ -1,8 +1,8 @@
 # Attempt Sync
 
-A Geode companion mod that syncs **Attempt Playback 1.5.7** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2081 and Geode 5.11.1 or compatible newer 5.x.
+A Geode companion mod that syncs **Attempt Playback 1.6.0-beta.1** saved ghosts across **iOS/iPadOS, macOS (Intel and Apple Silicon), and Windows (64-bit)** using the built-in **hdlolhfff/gd-attempts** repository. Targets Geometry Dash 2.2091 and Geode 6.0.0.
 
-Download the current test build from [Releases](https://github.com/hdlolhfff/attempt-sync/releases). All three native builds and core tests passed; in-game testing is still needed.
+Download the 2.2091 package from [Actions](https://github.com/hdlolhfff/attempt-sync/actions?query=branch%3Acodex%2Fgd-2.2091). In-game testing is still needed.
 
 **iOS update:** v1.0.0 shipped an unsigned iOS library and fails with “missing code signature”. Install v1.0.1, which signs the iOS library and verifies the signature in the final package.
 
@@ -10,7 +10,7 @@ Download the current test build from [Releases](https://github.com/hdlolhfff/att
 
 1. Open this repository's **Actions → Build Attempt Sync**. Open the latest successful run and download **Attempt-Sync-All-Platforms**. Unzip it to get the `.geode` mod.
 2. Import the `.geode` through your Geode launcher's file-import flow, or put it in your installation's `geode/mods` directory and restart. On iPad/iPhone, use an existing Geode-compatible GD launcher that supports importing local mods. This package is a mod, not an IPA or an App Store app.
-3. Install/enable Attempt Playback **1.5.7** on every device. The sync mod checks the version before accessing its files.
+3. Install and enable [Attempt Playback 1.6.0-beta.1](https://github.com/manshoety/AttemptPlaybackMod/releases/tag/v1.6.0-beta.1) on every device. Attempt Sync checks the version before accessing its files and also accepts 1.6.0 without a prerelease tag.
 
 If an Actions run is still building or fails, there is no validated installable package yet. Check the run before downloading. Source-only ZIP files are not installable mods.
 
@@ -67,7 +67,11 @@ Versions through 1.2.0 incorrectly treated the packed APX v5 practice segment as
 
 Before an owner sync changes anything, all changed files are validated and compared. One centered **Review Playback Sync** popup shows the batch file count, uploads/device updates, total local/GitHub sizes and attempts, unique attempts on each side, and the number of larger local files. Size alone does not determine which recordings to keep.
 
-Tap **Sync All** once to process the entire batch, or **Cancel** to stop before any uploads or replacements. There is no per-file confirmation. Cloud conflicts are merged using the approved local snapshots and retried without extra prompts. Automatic writer sync also asks once per batch. Unchanged batches do not prompt; read-only devices remain download-only. Preparation is limited to 256 MiB of local and merged data.
+Tap **Sync All** once to process the batch, or **Cancel** to stop before any uploads or replacements. There is no per-file confirmation. Cloud conflicts are merged using the approved local snapshots and retried without extra prompts. Automatic writer sync also asks once per batch. Unchanged batches do not prompt; read-only devices remain download-only. If a batch exceeds 512 MiB of local and merged data, sync again to pick up deferred levels.
+
+## Large recordings
+
+Attempt Sync 1.5.0 uploads APX files larger than 64 MiB as numbered 16 MiB parts. GitHub publishes all parts together in one commit. Downloads read the parts from the same commit, check their sizes, and rebuild a single APX file before merging and importing it. Existing single-file uploads still work. Update every device that needs to download chunked recordings.
 
 If a comparison finishes during gameplay, it waits until you return to the main menu to show the dialog. Local data changed meanwhile is kept and can be included by syncing again.
 
@@ -79,7 +83,7 @@ If a comparison finishes during gameplay, it waits until you return to the main 
 - Writer mode uses GitHub file SHAs for compare-and-swap writes. If another device or friend writes concurrently, it rereads and merges, retrying up to six times. Repeated unchanged syncs do not create commits.
 - Imports downloads only on the main thread, outside gameplay/editor. If you start playing during a request, they wait for your return to the main menu. If local data changed during the request, it skips that import; sync again.
 - Keeps each replaced local file under this mod's save directory in `backups/<timestamp>/`. Backups are retained until you remove them. Recover with GD closed by copying the backup file to Attempt Playback's `attempts` directory.
-- Stops safely on unsupported, malformed, oversized, or legacy files. Open legacy files in Attempt Playback 1.5.7 to migrate them before syncing. Completed files remain synced if a later file fails.
+- Stops safely on unsupported, malformed, oversized, or legacy files. Open legacy files in Attempt Playback to migrate them before syncing. Completed files remain synced if a later file fails.
 
 Sync is **additive**. Deleting ghosts locally does not delete them in the cloud, and a later sync can restore them. To remove a level's recordings everywhere, disable automatic sync on all devices, remove its local file on every device and its matching `attempts/…_attempts.apx` in the data repo, then reenable sync. Backups and Git history may retain older data.
 
@@ -93,7 +97,7 @@ Sync is **additive**. Deleting ghosts locally does not delete them in the cloud,
 
 ## Limits and verification
 
-- 64 MiB per level file, fewer than 1,000 level files, and 256 MiB of pending imports per batch (sync again to finish larger batches). A level above 64 MiB is skipped and reported, leaving that file untouched, instead of failing the whole batch. Large histories can approach GitHub API storage/rate limits; use another storage backend for very large libraries.
+- 256 MiB per level file, fewer than 1,000 level files, and 512 MiB of local and merged data per batch. Files over the per-level limit are skipped and reported.
 - Only APX v8, ATT3 v2, and PATH v5 are accepted. Official online level IDs match across devices. Editor/local levels sync when Attempt Playback gives them the same save ID; this mod does not sync the level itself.
 - GitHub credentials are entered by you on each device, except for the shared writer token included in published builds. This repo does not provision accounts, tokens, or iOS launchers.
 - Tests also verify that read-only mode never requests uploads, writer mode uploads new attempts, and the fixed source is correct. Core merge tests cover overlapping histories, serial collisions, practice references, repeated sync convergence, malformed/truncated input, and base64 encoding. Actual in-game behavior still needs device testing, particularly iOS importing and compatibility with other gameplay mods.
@@ -107,7 +111,7 @@ g++ -std=c++23 -Wall -Wextra -Werror -O2 tests/apx_test.cpp -o apx-test
 
 GitHub Actions builds the native mod for all requested platforms and combines them into one `.geode`. To build locally, install the Geode CLI and SDK, set `GEODE_SDK`, and run `geode build` using a host/toolchain for the intended platform.
 
-Format reference: https://github.com/manshoety/AttemptPlaybackMod (1.5.7). This is an independent companion, not an official Attempt Playback release.
+Format reference: https://github.com/manshoety/AttemptPlaybackMod/tree/v1.6.0-beta.1. This is an independent companion, not an official Attempt Playback release.
 
 Version 1.4.1 raises the per-level limit from 20 MiB to 64 MiB and skips an oversized level with a clear report instead of aborting the whole batch, so one huge history cannot block every other level. Batch memory limits rise to 256 MiB. GitHub permission and export errors now end with proper punctuation, and skipped levels are reported in the completion notification.
 

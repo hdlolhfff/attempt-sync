@@ -1,4 +1,5 @@
 #include <Geode/Geode.hpp>
+#include <asp/fs/std.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/utils/async.hpp>
@@ -9,6 +10,7 @@
 #include <set>
 #include <map>
 #include <string_view>
+#include "chunked_apx.hpp"
 #include "sync_cache.hpp"
 #include "sync_policy.hpp"
 
@@ -150,7 +152,7 @@ void progress(std::string message,std::string banner) {
 aps::Bytes read(fs::path const& p) {
     if(!fs::exists(p)) return {};
     aps::require(fs::is_regular_file(p) && !fs::is_symlink(p),"Attempt file must be a regular file");
-    auto n=fs::file_size(p); aps::require(n>=8,"Attempt file is empty or truncated"); aps::require(n<=aps::maxBytes,"Attempt file exceeds 64 MiB");
+    auto n=fs::file_size(p); aps::require(n>=8,"Attempt file is empty or truncated"); aps::checkAPXSize(n);
     std::ifstream in(p,std::ios::binary); aps::require(bool(in),"Cannot open attempt file");
     aps::Bytes b(n); in.read(reinterpret_cast<char*>(b.data()),std::streamsize(n));
     aps::require(bool(in),"Cannot read attempt file"); return b;
@@ -169,8 +171,8 @@ WebRequest request(Config const& c,bool raw=false) {
     if(!c.token.empty()) req.header("Authorization","Bearer "+c.token);
     req.header("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json")
        .header("X-GitHub-Api-Version","2022-11-28")
-       .header("User-Agent","AttemptSync/1.3.3")
-       .timeout(std::chrono::seconds(45));
+       .header("User-Agent","AttemptSync/1.5.0")
+       .timeout(asp::Duration::fromSecs(45));
     return req;
 }
 void ok(WebResponse const& r) {
@@ -179,13 +181,30 @@ void ok(WebResponse const& r) {
 matjson::Value json(WebResponse const& r) {
     ok(r); auto j=r.json(); aps::require(j.isOk(),"Invalid GitHub JSON"); return j.unwrap();
 }
-struct Remote { std::string sha; size_t size=0; };
+struct BranchHead { std::string commit, tree; };
+arc::Future<BranchHead> branchHead(Config const& c, std::string const& base) {
+    auto response = co_await request(c).get(base + "/branches/" + aps::playbackBranch);
+    if (response.code() == 404 && c.token.empty())
+        throw std::runtime_error("gd-attempts is private. Add your own authorized GitHub token in settings to access it.");
+    if (response.code() == 404)
+        throw std::runtime_error("gd-attempts or its main branch was not found. The saved token may be expired or no longer have access to that repository.");
+    if (response.code() == 403)
+        throw std::runtime_error("GitHub refused access (HTTP 403). The token may be rate limited, expired, or not authorized for gd-attempts. Replace it in settings and retry.");
+    auto branch = json(response);
+    co_return BranchHead{str(branch["commit"], "sha"), str(branch["commit"]["commit"]["tree"], "sha")};
+}
+
+struct Remote {
+    std::string sha;
+    size_t size = 0;
+    aps::RemoteParts parts;
+};
 // One tree request replaces a metadata request per level during compare.
-arc::Future<std::map<std::string,Remote>> remoteFiles(Config const& c,std::string const& commit) {
+arc::Future<std::map<std::string, Remote>> remoteFiles(Config const& c, BranchHead const& head) {
     auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
-    auto response=co_await request(c).param("recursive","1").get(base+"/git/trees/"+commit);
+    auto response=co_await request(c).param("recursive","1").get(base+"/git/trees/"+head.tree);
     std::map<std::string,Remote> files;
-    if(response.code()==404) co_return files;
+    std::map<std::string, aps::RemoteParts> directories;
     auto tree=json(response);
     aps::require(!tree["truncated"].asBool().unwrapOr(false),"GitHub repository tree is too large to list");
     auto const& items=tree["tree"]; aps::require(items.isArray(),"Unexpected GitHub tree response");
@@ -193,14 +212,135 @@ arc::Future<std::map<std::string,Remote>> remoteFiles(Config const& c,std::strin
     for(auto const& item:items) {
         auto path=str(item,"path");
         if(!std::string_view(path).starts_with(prefix)) continue;
-        auto name=path.substr(prefix.size());
-        if(!aps::safeName(name) || str(item,"type")!="blob") continue;
+        auto relative = path.substr(prefix.size());
+        auto slash = relative.find('/');
+        auto name = relative.substr(0, slash);
+        if (!aps::safeName(name)) continue;
+        auto type = str(item, "type");
+        if (slash == std::string::npos && type == "tree") {
+            files[name].sha = str(item, "sha");
+            directories.try_emplace(name);
+            continue;
+        }
+        auto mode = str(item, "mode");
+        aps::require(type == "blob" && (mode == "100644" || (slash == std::string::npos && mode == "100755")),
+            "Invalid remote APX tree entry");
         auto size=item["size"].asInt();
-        aps::require(size.isOk() && size.unwrap()>=0 && size.unwrap()<=std::intmax_t(aps::maxBytes),"Remote attempt size invalid or exceeds 64 MiB");
-        aps::require(files.size()<1000,"GitHub folder listing limit reached (1000 files)");
-        files[name]={str(item,"sha"),size_t(size.unwrap())};
+        aps::require(size.isOk() && size.unwrap() >= 0 && size.unwrap() <= std::intmax_t(aps::maxBytes), "Invalid remote APX size");
+        if (slash == std::string::npos) {
+            files[name] = {str(item, "sha"), size_t(size.unwrap()), {}};
+        } else {
+            directories[name].emplace(relative.substr(slash + 1), aps::RemotePart{str(item, "sha"), size_t(size.unwrap())});
+        }
+    }
+    aps::require(files.size() < 1000, "GitHub folder listing limit reached (1000 files)");
+    for (auto& [name, parts] : directories) {
+        auto found = files.find(name);
+        aps::require(found != files.end(), "Missing APX part directory");
+        found->second.size = aps::chunkedSize(parts);
+        found->second.parts = std::move(parts);
     }
     co_return files;
+}
+
+std::string blobUrl(Config const& c, std::string const& base, BranchHead const& head,
+                    std::string const& path, std::string const& sha) {
+    if (!c.token.empty()) return base + "/git/blobs/" + sha;
+    return "https://raw.githubusercontent.com/" + std::string(aps::playbackRepository) +
+        "/" + head.commit + "/attempts/" + path;
+}
+
+arc::Future<aps::Bytes> downloadAPX(Config const& c, std::string const& base, BranchHead const& head,
+                                  std::string const& name, Remote const& file) {
+    if (file.parts.empty()) {
+        auto response = co_await request(c, true).get(blobUrl(c, base, head, name, file.sha));
+        ok(response);
+        auto bytes = std::move(response).data();
+        aps::require(bytes.size() == file.size, "Remote blob size mismatch");
+        co_return std::move(bytes);
+    }
+    aps::Bytes rebuilt;
+    rebuilt.reserve(file.size);
+    for (size_t index = 0; index < file.parts.size(); ++index) {
+        progress(fmt::format("Downloading APX part {} of {} for {}.", index + 1, file.parts.size(), name),
+                 fmt::format("Downloading part {} / {}", index + 1, file.parts.size()));
+        auto partName = aps::partName(index, file.parts.size());
+        auto const& part = file.parts.at(partName);
+        auto response = co_await request(c, true).get(blobUrl(c, base, head, name + "/" + partName, part.sha));
+        ok(response);
+        aps::appendPart(rebuilt, std::move(response).data(), part.size);
+    }
+    co_return std::move(rebuilt);
+}
+
+void checkUpload(WebResponse const& response) {
+    if (response.code() == 403 || response.code() == 404) {
+        auto detail = response.code() == 403
+            ? "the token may be rate limited, expired, or missing Contents: Read and write"
+            : "the repository, branch, or this account's write access was not found";
+        throw std::runtime_error("GitHub refused the upload (HTTP " + std::to_string(response.code()) + "): " +
+            detail + ". The repository owner must add this GitHub account as a collaborator with Write access; then replace the token in settings.");
+    }
+    ok(response);
+}
+
+arc::Future<std::optional<std::string>> publishAPX(Config const& c, std::string const& base, BranchHead const& head,
+                                                 std::string const& name, Remote const& old, aps::Bytes const& file,
+                                                 std::string& stagedTree) {
+    auto path = "attempts/" + name;
+    auto message = "Sync Attempt Playback: " + name;
+    if (file.size() <= aps::singleBlobLimit && old.parts.empty()) {
+        auto body = matjson::Value::object();
+        body["message"] = message;
+        body["branch"] = aps::playbackBranch;
+        body["content"] = aps::base64(file);
+        if (!old.sha.empty()) body["sha"] = old.sha;
+        auto response = co_await request(c).bodyJSON(body).put(base + "/contents/" + path);
+        if (response.code() == 409 || response.code() == 422) co_return std::nullopt;
+        checkUpload(response);
+        co_return str(json(response)["content"], "sha");
+    }
+
+    if (stagedTree.empty()) {
+        auto parts = aps::splitAPX(file);
+        auto entries = matjson::Value::array();
+        for (size_t index = 0; index < parts.size(); ++index) {
+            progress(fmt::format("Uploading APX part {} of {} for {}.", index + 1, parts.size(), name),
+                     fmt::format("Uploading part {} / {}", index + 1, parts.size()));
+            auto body = matjson::Value::object();
+            body["encoding"] = "base64";
+            body["content"] = aps::base64(parts[index]);
+            auto response = co_await request(c).bodyJSON(body).post(base + "/git/blobs");
+            checkUpload(response);
+            entries.push(matjson::makeObject({
+                {"path", aps::partName(index, parts.size())}, {"mode", "100644"},
+                {"type", "blob"}, {"sha", str(json(response), "sha")}
+            }));
+        }
+        auto response = co_await request(c).bodyJSON(matjson::makeObject({{"tree", std::move(entries)}})).post(base + "/git/trees");
+        checkUpload(response);
+        stagedTree = str(json(response), "sha");
+    }
+
+    // Publish the whole part directory in one commit. A failed upload leaves the
+    // branch on the old file, and a non-fast-forward update forces a fresh merge.
+    auto entries = matjson::Value::array();
+    entries.push(matjson::makeObject({{"path", path}, {"mode", "040000"}, {"type", "tree"}, {"sha", stagedTree}}));
+    auto root = matjson::makeObject({{"base_tree", head.tree}, {"tree", std::move(entries)}});
+    auto treeResponse = co_await request(c).bodyJSON(root).post(base + "/git/trees");
+    checkUpload(treeResponse);
+    auto parents = matjson::Value::array();
+    parents.push(head.commit);
+    auto commit = matjson::makeObject({
+        {"message", message}, {"tree", str(json(treeResponse), "sha")}, {"parents", std::move(parents)}
+    });
+    auto commitResponse = co_await request(c).bodyJSON(commit).post(base + "/git/commits");
+    checkUpload(commitResponse);
+    auto ref = matjson::makeObject({{"sha", str(json(commitResponse), "sha")}, {"force", false}});
+    auto updated = co_await request(c).bodyJSON(ref).patch(base + "/git/refs/heads/" + aps::playbackBranch);
+    if (updated.code() == 409 || updated.code() == 422) co_return std::nullopt;
+    checkUpload(updated);
+    co_return stagedTree;
 }
 
 arc::Future<Outcome> sync(Config c) {
@@ -212,16 +352,8 @@ arc::Future<Outcome> sync(Config c) {
         cache=aps::loadCache(c.cache);
         auto base=std::string("https://api.github.com/repos/")+aps::playbackRepository;
         // Resolve branch first: a missing repo/branch must not be mistaken for an empty folder.
-        auto branchResponse=co_await request(c).get(base+"/branches/"+aps::playbackBranch);
-        if(branchResponse.code()==404 && c.token.empty())
-            throw std::runtime_error("gd-attempts is private. Add your own authorized GitHub token in settings to access it.");
-        if(branchResponse.code()==404)
-            throw std::runtime_error("gd-attempts or its main branch was not found. The saved token may be expired or no longer have access to that repository.");
-        if(branchResponse.code()==403)
-            throw std::runtime_error("GitHub refused access (HTTP 403). The token may be rate limited, expired, or not authorized for gd-attempts. Replace it in settings and retry.");
-        auto branch=json(branchResponse);
-        auto commit=str(branch["commit"],"sha");
-        auto cloud=co_await remoteFiles(c,commit);
+        auto head = co_await branchHead(c, base);
+        auto cloud = co_await remoteFiles(c, head);
         std::set<std::string> names;
         for(auto const& item:cloud) names.insert(item.first);
         fs::create_directories(c.dir);
@@ -230,16 +362,18 @@ arc::Future<Outcome> sync(Config c) {
             if(entry.is_regular_file() && aps::safeName(name)) names.insert(name);
         }
         aps::require(names.size()<1000,"Too many level files to sync");
-        struct Prepared { std::string name,sha; fs::path path; aps::Bytes local,merged; bool upload; };
+        struct Prepared { std::string name; Remote remote; fs::path path; aps::Bytes local,merged; bool upload; };
         std::vector<Prepared> batch;
         aps::BatchReview review;
         size_t preparedBytes=0;
+        size_t deferred=0;
         std::vector<std::string> oversized;
         // Prepare every file before asking once. No uploads or imports happen
         // until the complete, validated batch has been approved.
         struct Job {
             std::string name; fs::path path; aps::Bytes local; uint64_t hash=0;
-            std::string sha; size_t size=0; bool cached=false,download=false;
+            Remote const* remote = nullptr;
+            bool cached = false;
         };
         std::vector<std::string> order(names.begin(),names.end());
         size_t reviewed=0,cachedCount=0;
@@ -261,20 +395,20 @@ arc::Future<Outcome> sync(Config c) {
                     oversized.push_back(job.name); cache.erase(job.name); ++end; continue;
                 }
                 job.local=read(job.path); job.hash=aps::fingerprint(job.local);
+                windowBytes+=job.local.size();
                 auto found=cloud.find(job.name);
                 if(found!=cloud.end()) {
                     aps::require(found->second.size>=8,"Remote attempt file is empty or truncated");
-                    job.sha=found->second.sha; job.size=found->second.size;
+                    job.remote=&found->second;
                     auto entry=cache.find(job.name);
-                    job.cached=entry!=cache.end() && entry->second.sha==job.sha && entry->second.hash==job.hash;
+                    job.cached=entry!=cache.end() && entry->second.sha==job.remote->sha && entry->second.hash==job.hash;
                     if(!job.cached) {
                         // Public viewers read blob bytes from the CDN so large
                         // first syncs do not exhaust the 60-request API quota.
-                        auto blobUrl=c.token.empty()
-                            ? "https://raw.githubusercontent.com/"+std::string(aps::playbackRepository)+"/"+commit+"/attempts/"+job.name
-                            : base+"/git/blobs/"+job.sha;
-                        futures.push_back(request(c,true).get(blobUrl));
-                        job.download=true; windowBytes+=job.size;
+                        if (job.remote->parts.empty()) {
+                            futures.push_back(request(c,true).get(blobUrl(c,base,head,job.name,job.remote->sha)));
+                        }
+                        windowBytes+=job.remote->size;
                     }
                 }
                 jobs.push_back(std::move(job));
@@ -289,23 +423,37 @@ arc::Future<Outcome> sync(Config c) {
                 progress(fmt::format("Comparing file {} of {}: {}. Please wait; the batch review will appear when ready.",reviewed,order.size(),job.name),fmt::format("Comparing {} / {}",reviewed,order.size()));
                 if(job.cached) { ++out.synced; ++cachedCount; continue; }
                 aps::Bytes bytes;
-                if(job.download) {
-                    auto& blob=responses[next++];
-                    ok(blob); bytes=std::move(blob).data();
-                    aps::require(bytes.size()==job.size,"Remote blob size mismatch");
-                    aps::require(bytes.size()>=8,"Remote attempt file is empty or truncated");
+                if(job.remote) {
+                    if(job.remote->parts.empty()) {
+                        auto& blob=responses[next++];
+                        ok(blob); bytes=std::move(blob).data();
+                        aps::require(bytes.size()==job.remote->size,"Remote blob size mismatch");
+                    } else {
+                        bytes=co_await downloadAPX(c,base,head,job.name,*job.remote);
+                    }
                 }
                 aps::require(c.owner || !bytes.empty(),"Playback missing from the selected cloud snapshot");
-                auto plan=aps::planSync(bytes,job.local,c.owner);
-                if(plan.upload || plan.imported!=job.local) {
-                    review.add(aps::compareFiles(bytes,job.local),plan.upload,plan.imported!=job.local);
-                    preparedBytes+=job.local.size()+plan.imported.size();
-                    aps::require(preparedBytes<=256*1024*1024,"Sync batch exceeds 256 MiB. No files were changed.");
-                    batch.push_back({job.name,job.sha,job.path,std::move(job.local),std::move(plan.imported),plan.upload});
+                aps::SyncPlan plan;
+                try {
+                    plan=aps::planSync(bytes,job.local,c.owner);
+                } catch (aps::APXTooLarge const&) {
+                    oversized.push_back(job.name);
                     cache.erase(job.name);
+                    continue;
+                }
+                if(plan.upload || plan.imported!=job.local) {
+                    cache.erase(job.name);
+                    auto retained=job.local.size()+plan.imported.size();
+                    if(retained>aps::batchLimit-preparedBytes) {
+                        ++deferred;
+                        continue;
+                    }
+                    review.add(aps::compareFiles(bytes,job.local),plan.upload,plan.imported!=job.local);
+                    preparedBytes+=retained;
+                    batch.push_back({job.name,job.remote?*job.remote:Remote{},job.path,std::move(job.local),std::move(plan.imported),plan.upload});
                 } else {
                     ++out.synced;
-                    if(!job.sha.empty()) cache[job.name]={job.sha,job.hash};
+                    if(job.remote) cache[job.name]={job.remote->sha,job.hash};
                 }
             }
             start=end;
@@ -322,7 +470,8 @@ arc::Future<Outcome> sync(Config c) {
             currentFile=item.name;
             ++processed;
             progress(fmt::format("{} file {} of {}: {}. Please wait; no more confirmation is needed.",c.owner?"Syncing":"Downloading",processed,batch.size(),item.name),fmt::format("Syncing {} / {}",processed,batch.size()));
-            auto endpoint=base+"/contents/attempts/"+item.name;
+            auto expectedHead=head;
+            std::string stagedTree;
             bool done=false;
             // Several devices can write at once, so conflicts are expected.
             // Each retry re-reads the file, merges, and rewrites; the approved
@@ -331,56 +480,45 @@ arc::Future<Outcome> sync(Config c) {
                 if(item.upload) {
                     progress(fmt::format("Uploading file {} of {}: {}.",processed,batch.size(),item.name),
                              fmt::format("Uploading {} / {} ({}%)",processed,batch.size(),(processed-1)*100/batch.size()));
-                    auto body=matjson::Value::object();
-                    body["message"]="Sync Attempt Playback: "+item.name;
-                    body["branch"]=aps::playbackBranch;
-                    body["content"]=aps::base64(item.merged);
-                    if(!item.sha.empty()) body["sha"]=item.sha;
-                    auto uploaded=co_await request(c).bodyJSON(body).put(endpoint);
-                    if(uploaded.code()==403 || uploaded.code()==404) {
-                        auto detail=uploaded.code()==403
-                            ? "the token may be rate limited, expired, or missing Contents: Read and write"
-                            : "the repository, branch, or this account's write access was not found";
-                        throw std::runtime_error("GitHub refused the upload (HTTP "+std::to_string(uploaded.code())+"): "+std::string(detail)+". The repository owner must add this GitHub account as a collaborator with Write access; then replace the token in settings.");
-                    }
-                    if(uploaded.code()==409 || uploaded.code()==422) {
+                    auto published=co_await publishAPX(c,base,expectedHead,item.name,item.remote,item.merged,stagedTree);
+                    if(!published) {
                         progress(fmt::format("Retrying file {} of {} after a cloud change: {}.",processed,batch.size(),item.name),fmt::format("Retrying upload {} / {}",processed,batch.size()));
-                        // Retain the approved local snapshot, merge cloud additions,
-                        // and retry without another confirmation for this file.
-                        auto response=co_await request(c).param("ref",aps::playbackBranch).get(endpoint);
-                        aps::Bytes remote;
-                        item.sha.clear();
-                        if(response.code()!=404) {
-                            auto meta=json(response);
-                            aps::require(str(meta,"type")=="file","Remote attempt path is not a file");
-                            auto size=meta["size"].asInt();
-                            aps::require(size.isOk() && size.unwrap()>=8 && size.unwrap()<=int64_t(aps::maxBytes),"Remote attempt size invalid");
-                            item.sha=str(meta,"sha");
-                            auto blob=co_await request(c,true).get(base+"/git/blobs/"+item.sha);
-                            ok(blob); remote=blob.data();
-                            aps::require(remote.size()==size_t(size.unwrap()),"Remote blob size mismatch");
+                        expectedHead=co_await branchHead(c,base);
+                        auto latest=co_await remoteFiles(c,expectedHead);
+                        auto found=latest.find(item.name);
+                        auto remote=found==latest.end()?Remote{}:std::move(found->second);
+                        if(remote.sha!=item.remote.sha) {
+                            aps::Bytes bytes;
+                            if(!remote.sha.empty()) {
+                                aps::require(remote.size>=8,"Remote attempt file is empty or truncated");
+                                bytes=co_await downloadAPX(c,base,expectedHead,item.name,remote);
+                            }
+                            // Preserve the approved recordings when another device
+                            // adds recordings before publication.
+                            aps::SyncPlan plan;
+                            try {
+                                plan=aps::planSync(bytes,item.merged,true);
+                            } catch (aps::APXTooLarge const&) {
+                                oversized.push_back(item.name);
+                                done=true;
+                                continue;
+                            }
+                            preparedBytes-=item.merged.size();
+                            preparedBytes+=plan.imported.size();
+                            aps::require(preparedBytes<=aps::batchLimit,"Sync batch exceeds 512 MiB after cloud changes. Retry sync.");
+                            if(plan.imported!=item.merged) stagedTree.clear();
+                            item.merged=std::move(plan.imported);
+                            item.upload=plan.upload;
                         }
-                        auto plan=aps::planSync(remote,item.merged,true);
-                        preparedBytes-=item.merged.size();
-                        preparedBytes+=plan.imported.size();
-                        aps::require(preparedBytes<=256*1024*1024,"Sync batch exceeds 256 MiB after cloud changes. Retry sync.");
-                        item.merged=std::move(plan.imported); item.upload=plan.upload;
+                        item.remote=std::move(remote);
                         continue;
                     }
-                    ok(uploaded);
-                    // The write response carries the new blob SHA, so the next
-                    // sync can recognize this level without downloading it.
-                    if(auto body=uploaded.json(); body.isOk()) {
-                        auto sha=body.unwrap()["content"]["sha"].asString();
-                        if(sha.isOk()) cache[item.name]={sha.unwrap(),aps::fingerprint(item.merged)};
-                    }
+                    item.remote.sha=std::move(*published);
                 }
-                // No upload means `item.sha` still identifies the cloud blob this
-                // merged file was built from; remember it to skip later downloads.
-                if(!item.upload && !item.sha.empty()) cache[item.name]={item.sha,aps::fingerprint(item.merged)};
+                if(!item.remote.sha.empty()) cache[item.name]={item.remote.sha,aps::fingerprint(item.merged)};
                 if(item.merged!=item.local) {
                     importBytes+=item.local.size()+item.merged.size();
-                    aps::require(importBytes<=256*1024*1024,"Download batch exceeds 256 MiB. Retry sync.");
+                    aps::require(importBytes<=aps::batchLimit,"Download batch exceeds 512 MiB. Retry sync.");
                     out.imports.push_back({item.path,std::move(item.local),std::move(item.merged)});
                 }
                 progress(fmt::format("Completed file {} of {}: {}.",processed,batch.size(),item.name),
@@ -396,9 +534,10 @@ arc::Future<Outcome> sync(Config c) {
             std::string list;
             for(size_t i=0;i<oversized.size() && i<3;++i) list+=std::string(i?", ":"")+oversized[i];
             if(oversized.size()>3) list+=", and more";
-            out.skipped=int(oversized.size());
-            out.message+=" Skipped "+std::to_string(oversized.size())+" level(s) over 64 MiB ("+list+"). Those files were left unchanged.";
+            out.message+=" Skipped "+std::to_string(oversized.size())+" level(s) over 256 MiB ("+list+"). Those files were left unchanged.";
         }
+        if(deferred) out.message+=" Sync again to process "+std::to_string(deferred)+" level(s) deferred to fit the 512 MiB batch limit.";
+        out.skipped=int(oversized.size()+deferred);
         aps::saveCache(c.cache,cache);
     } catch(std::exception const& e) {
         aps::saveCache(c.cache,cache);
@@ -413,9 +552,14 @@ void installPending() {
     auto out=std::move(*pending); pending.reset();
     int skipped=0;
     try {
-        auto root=Mod::get()->getSaveDir()/"backups";
+        auto root=(Mod::get()->getSaveDir()/"backups").toStdPath().unwrap();
         for(auto const& item:out.imports) {
-            if(read(item.path)!=item.before) { ++skipped; continue; }
+            try {
+                if(read(item.path)!=item.before) { ++skipped; continue; }
+            } catch (aps::APXTooLarge const&) {
+                ++skipped;
+                continue;
+            }
             auto backup=root/std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
             fs::create_directories(backup);
             auto name=item.path.filename();
@@ -450,10 +594,13 @@ void start() {
         c.token=mod->getSettingValue<std::string>("github-token");
         aps::require(!c.owner || !c.token.empty(),"To upload your attempts, add your GitHub token with Contents read/write access to gd-attempts in settings.");
         auto playback=Loader::get()->getLoadedMod("manshoety.attemptplayback");
-        aps::require(playback!=nullptr,"Enable Attempt Playback 1.5.7 first.");
-        aps::require(playback->getVersion()==VersionInfo(1,5,7),"This sync format was verified for Attempt Playback 1.5.7. Use that version until this mod is updated.");
-        c.dir=playback->getSaveDir()/"attempts";
-        c.cache=mod->getSaveDir()/"sync-cache.txt";
+        aps::require(playback!=nullptr,"Enable Attempt Playback 1.6.0-beta.1 or 1.6.0 first.");
+        constexpr auto testedBeta=VersionInfo(1,6,0,VersionTag(VersionTag::Beta,1));
+        constexpr auto stable=VersionInfo(1,6,0);
+        auto version=playback->getVersion();
+        aps::require(version==testedBeta || version==stable,"Use Attempt Playback 1.6.0-beta.1 or 1.6.0 to sync recordings.");
+        c.dir=(playback->getSaveDir()/"attempts").toStdPath().unwrap();
+        c.cache=(mod->getSaveDir()/"sync-cache.txt").toStdPath().unwrap();
         running=true; status="Syncing with GitHub. You can keep playing; downloads apply at the main menu.";
         showLiveProgress("Attempt Sync: connecting...");
         async::spawn(sync(std::move(c)),[](Outcome out) {

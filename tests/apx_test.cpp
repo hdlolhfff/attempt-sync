@@ -1,5 +1,6 @@
 #include "../src/sync_policy.hpp"
 #include "../src/sync_cache.hpp"
+#include "../src/chunked_apx.hpp"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -41,6 +42,52 @@ Bytes file(std::vector<Bytes> const& attempts,std::vector<Bytes> const& sessions
     chunk(b,0x48544150,path); return b;
 }
 template<class F> void rejects(F fn) { bool failed=false; try { fn(); } catch(std::exception const&) { failed=true; } assert(failed); }
+void testChunkedAPX() {
+    // Generate a valid APX recording that crosses the old 64 MiB limit.
+    constexpr uint32_t frames = 3'000'000;
+    Bytes large = {'A', 'P', 'X', '2', 8, 0, 0, 0};
+    {
+        Bytes recording(48);
+        put(recording, 0, 1);
+        recording[14] = 2;
+        put(recording, 16, frames);
+        append32(recording, frames * 23);
+        recording.resize(52 + frames * 23);
+        for (size_t offset = 52; offset < recording.size(); offset += 23) recording[offset] = 1;
+        append32(recording, 0);
+        chunk(large, 0x33545441, recording);
+        auto practice = file({}, {session(1, 1)});
+        large.insert(large.end(), practice.begin() + 8, practice.end());
+    }
+    assert(large.size() > singleBlobLimit);
+    auto parts = splitAPX(large);
+    assert(parts.size() == 5 && parts[0].size() == partSize);
+    RemoteParts listing;
+    for (size_t index = parts.size(); index-- > 0;) {
+        listing.emplace(partName(index, parts.size()), RemotePart{"", parts[index].size()});
+    }
+    assert(chunkedSize(listing) == large.size());
+    Bytes rebuilt;
+    rebuilt.reserve(chunkedSize(listing));
+    for (size_t index = 0; index < parts.size(); ++index) {
+        appendPart(rebuilt, parts[index], listing.at(partName(index, parts.size())).size);
+    }
+    assert(rebuilt == large);
+    assert(parse(rebuilt).attempts.size() == 1 && parse(rebuilt).sessions.size() == 1);
+    assert(merge(rebuilt, large) == large);
+    rejects([&] { appendPart(rebuilt, parts.back().first(parts.back().size() - 1), parts.back().size()); });
+    auto damaged = listing;
+    damaged.erase(partName(parts.size() - 1, parts.size()));
+    rejects([&] { chunkedSize(damaged); });
+    damaged = listing;
+    --damaged.at(partName(0, parts.size())).size;
+    rejects([&] { chunkedSize(damaged); });
+    damaged = listing;
+    damaged.emplace("../unexpected", RemotePart{"", 1});
+    rejects([&] { chunkedSize(damaged); });
+    checkAPXSize(maxBytes);
+    rejects([&] { checkAPXSize(maxBytes + 1); });
+}
 int main() {
     auto a=file({attempt(1,10)},{session(1,1)});
     auto b=file({attempt(1,20)},{session(1,1)});
@@ -102,7 +149,8 @@ int main() {
         if(i==8 || i==8+8+attempt(1,10).size()) continue; // valid chunk-boundary files
         rejects([&]{parse(Bytes(a.begin(),a.begin()+i));});
     }
-    assert(base64({})=="" && base64({'f'})=="Zg==" && base64({'f','o'})=="Zm8=" && base64({'f','o','o'})=="Zm9v");
+    assert(base64({})=="" && base64(Bytes{'f'})=="Zg==" && base64(Bytes{'f','o'})=="Zm8=" && base64(Bytes{'f','o','o'})=="Zm9v");
+    testChunkedAPX();
     // Convergence across devices and repeated overlapping histories.
     auto cloud=a;
     for(uint32_t i=2;i<100;++i) cloud=merge(cloud,file({attempt(1,uint8_t(i))}));
