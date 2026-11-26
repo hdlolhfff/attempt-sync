@@ -451,8 +451,11 @@ void start() {
         c.token=mod->getSettingValue<std::string>("github-token");
         aps::require(!c.owner || !c.token.empty(),"To upload your attempts, add your GitHub token with Contents read/write access to gd-attempts in settings.");
         auto playback=Loader::get()->getLoadedMod("manshoety.attemptplayback");
-        aps::require(playback!=nullptr,"Enable Attempt Playback 1.6.0 first.");
-        aps::require(playback->getVersion()==VersionInfo(1,6,0),"This sync format was verified for Attempt Playback 1.6.0. Use that version until this mod is updated.");
+        aps::require(playback!=nullptr,"Enable Attempt Playback 1.6.0-beta.1 or 1.6.0 first.");
+        constexpr auto testedBeta=VersionInfo(1,6,0,VersionTag(VersionTag::Beta,1));
+        constexpr auto stable=VersionInfo(1,6,0);
+        auto version=playback->getVersion();
+        aps::require(version==testedBeta || version==stable,"Use Attempt Playback 1.6.0-beta.1 or 1.6.0 to sync recordings.");
         c.dir=(playback->getSaveDir()/"attempts").toStdPath().unwrap();
         c.cache=(mod->getSaveDir()/"sync-cache.txt").toStdPath().unwrap();
         running=true; status="Syncing with GitHub. You can keep playing; downloads apply at the main menu.";
